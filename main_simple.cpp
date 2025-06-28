@@ -39,7 +39,7 @@ int main() {
         std::cout << "Distancias desde el primer vector de consulta:" << std::endl;
         
         for (int i = 0; i < 5 && i < static_cast<int>(base_vectors.size()); ++i) {
-            float distance = query.distanceTo(base_vectors[i]);
+            float distance = SIFTVector::distance(query, base_vectors[i]);
             std::cout << "  Vector base " << i << " (ID: " << base_vectors[i].id 
                       << "): distancia = " << distance << std::endl;
         }

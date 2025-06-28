@@ -8,34 +8,36 @@
 #include <algorithm> // Para std::shuffle, std::sort, etc.
 #include <random>
 #include "Point.h"
-#include "SSPTree.h" // Usaremos el k-means de aquí
+#include "SSPtree.h" // Usaremos el k-means de aquí
 
 using namespace std;
 
 // Declaración adelantada para el helper k-means
-std::vector<int> kmeansClusteringGeneral(const std::vector<Point>& points_to_cluster, size_t k);
+template<typename PointType>
+std::vector<int> kmeansClusteringGeneral(const std::vector<PointType>& points_to_cluster, size_t k);
 
 // --- Helpers para los algoritmos Top-K ---
 
 // Implementación de NaiveTopK (similar a Algoritmo 1 del paper)
 // Esto es un k-NN por fuerza bruta.
-std::vector<Point> naiveTopK(const Point& query, const std::vector<Point>& points, size_t k) {
+template<typename PointType>
+std::vector<PointType> naiveTopK(const PointType& query, const std::vector<PointType>& points, size_t k) {
     if (points.empty() || k == 0) {
         return {};
     }
     
-    using Elem = std::pair<float, Point>;
+    using Elem = std::pair<float, PointType>;
     std::vector<Elem> dist_pairs;
     dist_pairs.reserve(points.size());
     for (const auto& p : points) {
-        dist_pairs.emplace_back(Point::distance(query, p), p);
+        dist_pairs.emplace_back(PointType::distance(query, p), p);
     }
 
     k = std::min(k, points.size());
     auto cmp = [](const Elem& a, const Elem& b) { return a.first > b.first ? true : false; };
     std::partial_sort(dist_pairs.begin(), dist_pairs.begin() + k, dist_pairs.end(), cmp);
 
-    std::vector<Point> result;
+    std::vector<PointType> result;
     result.reserve(k);
     for (size_t i = 0; i < k; ++i) {
         result.push_back(dist_pairs[i].second);
@@ -44,7 +46,8 @@ std::vector<Point> naiveTopK(const Point& query, const std::vector<Point>& point
 }
 
 // Implementación de ApproximateTopK (Algoritmo 2 del paper)
-std::vector<Point> approximateTopK(const Point& query, const std::vector<Point>& points, size_t k, size_t l_bins) {
+template<typename PointType>
+std::vector<PointType> approximateTopK(const PointType& query, const std::vector<PointType>& points, size_t k, size_t l_bins) {
     if (points.empty() || k == 0) {
         return {};
     }
@@ -63,7 +66,7 @@ std::vector<Point> approximateTopK(const Point& query, const std::vector<Point>&
     std::shuffle(indices.begin(), indices.end(), g);
 
     // Encontrar el mínimo en cada uno de los 'l' bins
-    std::vector<Point> bin_mins;
+    std::vector<PointType> bin_mins;
     bin_mins.reserve(l_bins);
 
     size_t bin_size = (points.size() + l_bins - 1) / l_bins;
@@ -74,11 +77,11 @@ std::vector<Point> approximateTopK(const Point& query, const std::vector<Point>&
 
         if (start_idx >= end_idx) continue;
 
-        Point min_point = points[indices[start_idx]];
-        float min_dist = Point::distance(query, min_point);
+        PointType min_point = points[indices[start_idx]];
+        float min_dist = PointType::distance(query, min_point);
 
         for (size_t j = start_idx + 1; j < end_idx; ++j) {
-            float dist = Point::distance(query, points[indices[j]]);
+            float dist = PointType::distance(query, points[indices[j]]);
             if (dist < min_dist) {
                 min_dist = dist;
                 min_point = points[indices[j]];
@@ -92,15 +95,16 @@ std::vector<Point> approximateTopK(const Point& query, const std::vector<Point>&
 }
 
 // Versión de naiveTopK que usa distancia al cuadrado. Es más eficiente y consistente.
-std::vector<Point> naiveTopKSquared(const Point& query, const std::vector<Point>& points, size_t k) {
+template<typename PointType>
+std::vector<PointType> naiveTopKSquared(const PointType& query, const std::vector<PointType>& points, size_t k) {
     if (points.empty() || k == 0) return {};
     
-    using Elem = std::pair<double, Point>;
+    using Elem = std::pair<double, PointType>;
     std::vector<Elem> dist_pairs;
     dist_pairs.reserve(points.size());
     for (const auto& p : points) {
         double dist_sq = 0.0;
-        for(size_t i=0; i<DIM; ++i) {
+        for(size_t i=0; i<PointType::getDimension(); ++i) {
             double diff = static_cast<double>(query[i]) - static_cast<double>(p[i]);
             dist_sq += diff * diff;
         }
@@ -111,7 +115,7 @@ std::vector<Point> naiveTopKSquared(const Point& query, const std::vector<Point>
     auto cmp = [](const Elem& a, const Elem& b) { return a.first > b.first ? true : false; };
     std::partial_sort(dist_pairs.begin(), dist_pairs.begin() + k, dist_pairs.end(), cmp);
 
-    std::vector<Point> result;
+    std::vector<PointType> result;
     result.reserve(k);
     for (size_t i = 0; i < k; ++i) result.push_back(dist_pairs[i].second);
     return result;
@@ -119,10 +123,11 @@ std::vector<Point> naiveTopKSquared(const Point& query, const std::vector<Point>
 
 // Versión CORRECTA de approximateTopK que usa la métrica de distancia consistente.
 // Ahora implementa la lógica de aproximación de "bins" correctamente.
-std::vector<Point> approximateTopK_with_distances(
-    const Point& query,
+template<typename PointType>
+std::vector<PointType> approximateTopK_with_distances(
+    const PointType& query,
     const std::vector<long long>& distances, 
-    const std::vector<Point>& points, 
+    const std::vector<PointType>& points, 
     size_t k, 
     size_t l_bins
 ) {
@@ -138,12 +143,13 @@ std::vector<Point> approximateTopK_with_distances(
         auto cmp = [](const Elem& a, const Elem& b) { return a.first > b.first ? true : false; };
         std::partial_sort(dist_idx_pairs.begin(), dist_idx_pairs.begin() + k, dist_idx_pairs.end(), cmp);
 
-        std::vector<Point> result;
+        std::vector<PointType> result;
         result.reserve(k);
         for(size_t i = 0; i < k; ++i) result.push_back(points[dist_idx_pairs[i].second]);
         return result;
     }
 
+    // el error en esta logica de aproximacion, porque la truncacion de distancias funciona bien
     // --- LÓGICA DE APROXIMACIÓN (Shuffle and Bin) ---
     std::vector<size_t> indices(points.size());
     std::iota(indices.begin(), indices.end(), 0);
@@ -152,14 +158,13 @@ std::vector<Point> approximateTopK_with_distances(
     static std::mt19937 g(rd());
     std::shuffle(indices.begin(), indices.end(), g);
 
-    std::vector<Point> candidate_points;
+    std::vector<PointType> candidate_points;
     candidate_points.reserve(l_bins);
 
     size_t bin_size = (points.size() + l_bins - 1) / l_bins;
     for (size_t i = 0; i < l_bins; ++i) {
         size_t start_idx = i * bin_size;
         size_t end_idx = std::min(start_idx + bin_size, points.size());
-        //size_t end_idx = std::min((i + 1) * bin_size, points.size());
         if (start_idx >= end_idx) continue;
         
         size_t min_idx_in_bin = indices[start_idx];
@@ -189,9 +194,10 @@ std::vector<Point> approximateTopK_with_distances(
  * @param ls El número de bins para el algoritmo ApproximateTopK (l en el paper).
  * @return Un vector con los k-vecinos más cercanos aproximados.
  */
-std::vector<Point> linearScanKnn(
-    const Point& query,
-    const std::vector<Point>& allPoints,
+template<typename PointType>
+std::vector<PointType> linearScanKnn(
+    const PointType& query,
+    const std::vector<PointType>& allPoints,
     size_t k,
     size_t rp,
     size_t ls
@@ -203,7 +209,7 @@ std::vector<Point> linearScanKnn(
 
     for (const auto& p : allPoints) {
         double dist_sq_d = 0.0;
-        for (size_t i = 0; i < DIM; ++i) {
+        for (size_t i = 0; i < PointType::getDimension(); ++i) {
             double diff_d = static_cast<double>(query[i]) - static_cast<double>(p[i]);
             dist_sq_d += diff_d * diff_d;
         }
@@ -218,12 +224,13 @@ std::vector<Point> linearScanKnn(
 
 // --- Clase Principal para la base de datos SANNS ---
 
+template<typename PointType>
 class SannsDB {
 public:
     // Estructuras de datos internas, como se describe en la sección 3.3
     struct Cluster {
-        Point center;
-        std::vector<Point> points;
+        PointType center;
+        std::vector<PointType> points;
     };
 
     struct Group {
@@ -232,7 +239,7 @@ public:
 
 private:
     std::vector<Group> m_groups;
-    std::vector<Point> m_stash;
+    std::vector<PointType> m_stash;
     
     // Hiperparámetros (ver Figura 1 del paper)
     size_t m_max_cluster_size_m;
@@ -249,35 +256,39 @@ public:
     {}
 
     // Método principal para construir la estructura a partir del dataset.
-    void build(const std::vector<Point>& dataset) {
+    void build(const std::vector<PointType>& dataset) {
         std::cout << "Iniciando construcción de SannsDB con " << dataset.size() << " puntos...\n";
         m_groups.clear();
         m_stash.clear();
-        balancedClusteringRecursive(dataset);
-        std::cout << "Construcción finalizada. Se crearon " << m_groups.size() 
+        // Heurística simple para elegir 'k' en k-means
+        size_t initial_k = std::max(2ULL, static_cast<size_t>(std::sqrt(dataset.size()) / 2.0));
+        initial_k = std::min(initial_k, dataset.size());
+        balancedClusteringRecursive(dataset, initial_k);
+        //balancedClusteringRecursive(dataset);
+        std::cout << "Construccion finalizada. Se crearon " << m_groups.size() 
                   << " grupos y un stash de " << m_stash.size() << " puntos.\n";
     }
 
     // Método principal para realizar la búsqueda k-NN (Algoritmo 4 y Figura 2)
-    std::vector<Point> kNearestNeighbors(const Point& query, size_t k) const {
+    std::vector<PointType> kNearestNeighbors(const PointType& query, size_t k) const {
         // --- 1. Recuperar puntos de los clústeres ---
-        std::vector<Point> cluster_candidate_points;
+        std::vector<PointType> cluster_candidate_points;
 
         // Iterar sobre cada grupo de clústeres
         for (const auto& group : m_groups) {
-            std::vector<Point> centers;
+            std::vector<PointType> centers;
             centers.reserve(group.clusters.size());
             for (const auto& cluster : group.clusters) {
                 centers.push_back(cluster.center);
             }
             
             // Paso 3 de Fig 2: Approximate Top-u para los centros
-            std::vector<Point> closest_centers = approximateTopK(query, centers, m_clusters_to_retrieve_u, m_approx_topk_bins_l);
+            std::vector<PointType> closest_centers = approximateTopK(query, centers, m_clusters_to_retrieve_u, m_approx_topk_bins_l);
 
             // Recuperar todos los puntos de los clústeres seleccionados
             for (const auto& center : closest_centers) {
                 for (const auto& cluster : group.clusters) {
-                    if (Point::distance(center, cluster.center) < 1e-6f) { // Comparar puntos flotantes
+                    if (PointType::distance(center, cluster.center) < 1e-6f) { // Comparar puntos flotantes
                         cluster_candidate_points.insert(cluster_candidate_points.end(), cluster.points.begin(), cluster.points.end());
                         break;
                     }
@@ -286,14 +297,14 @@ public:
         }
         
         // Paso 6 de Fig 2: Naive Top-k sobre los candidatos de clústeres
-        std::vector<Point> cluster_neighbors = naiveTopK(query, cluster_candidate_points, k);
+        std::vector<PointType> cluster_neighbors = naiveTopK(query, cluster_candidate_points, k);
 
         // --- 2. Recuperar puntos del Stash ---
         // Paso 6 (alterno): Approximate Top-k sobre el Stash
-        std::vector<Point> stash_neighbors = approximateTopK(query, m_stash, k, m_approx_topk_bins_l);
+        std::vector<PointType> stash_neighbors = approximateTopK(query, m_stash, k, m_approx_topk_bins_l);
 
         // --- 3. Combinar y resultado final ---
-        std::vector<Point> final_candidates = cluster_neighbors;
+        std::vector<PointType> final_candidates = cluster_neighbors;
         final_candidates.insert(final_candidates.end(), stash_neighbors.begin(), stash_neighbors.end());
         
         // Paso 7 de Fig 2: Naive Top-k sobre los 2k candidatos finales
@@ -303,19 +314,19 @@ public:
 
 private:
     // Implementación del "Balanced Clustering" recursivo (Sección 3.3)
-    void balancedClusteringRecursive(const std::vector<Point>& points) {
+    void balancedClusteringRecursive(const std::vector<PointType>& points, size_t& k_for_kmeans) {
         if (points.empty()) return;
 
         // Heurística simple para elegir 'k' en k-means
-        size_t k_for_kmeans = std::max(static_cast<size_t>(2), static_cast<size_t>(std::sqrt(points.size()) / 2.0));
-        k_for_kmeans = std::min(k_for_kmeans, points.size());
+        //size_t k_for_kmeans = std::max(static_cast<size_t>(2), static_cast<size_t>(std::sqrt(points.size()) / 2.0));
+        //k_for_kmeans = std::min(k_for_kmeans, points.size());
         
         // Aplicar K-means
         std::vector<int> assignments = kmeansClusteringGeneral(points, k_for_kmeans);
         std::vector<Cluster> current_clusters(k_for_kmeans);
 
         // Calcular centros y miembros de cada clúster
-        std::vector<Point> sums(k_for_kmeans);
+        std::vector<PointType> sums(k_for_kmeans);
         std::vector<int> counts(k_for_kmeans, 0);
         for(size_t i = 0; i < points.size(); ++i) {
             int cluster_idx = assignments[i];
@@ -331,7 +342,7 @@ private:
 
         // Separar clústeres pequeños de los grandes
         Group small_clusters_group;
-        std::vector<Point> large_cluster_points;
+        std::vector<PointType> large_cluster_points;
         for (const auto& cluster : current_clusters) {
             if (cluster.points.empty()) continue;
             
@@ -342,19 +353,25 @@ private:
             }
         }
 
-        // Guardar el grupo de clústeres pequeños
+        // --- NUEVA LÓGICA DE DETECCIÓN DE ESTANCAMIENTO ---
+        if (!large_cluster_points.empty() && large_cluster_points.size() == points.size()) {
+            // ¡ESTANCAMIENTO DETECTADO! K-Means no dividió nada.
+            std::cerr << "    -> Estancamiento detectado. Aumentando k para forzar division.\n";
+            k_for_kmeans *= 2; // Duplicar el número de clústeres para el siguiente intento
+        } else {
+            // Progreso normal, reiniciar k para la siguiente recursión
+            size_t next_k = std::max(2ULL, static_cast<size_t>(std::sqrt(large_cluster_points.size()) / 2.0));
+            k_for_kmeans = std::min(next_k, large_cluster_points.size());
+        }
+
         if (!small_clusters_group.clusters.empty()) {
             m_groups.push_back(small_clusters_group);
         }
-
-        // Decidir si recursar o poner en el stash
+        
+        // Decisión: ¿Recursión o Stash?
         if (large_cluster_points.size() > m_large_cluster_fraction_alpha * points.size() && large_cluster_points.size() > 1) {
-            // "apply the same procedure recursively to X'"
-            std::cout << "    -> Recursando en " << large_cluster_points.size() << " puntos de clústeres grandes.\n";
-            balancedClusteringRecursive(large_cluster_points);
+            balancedClusteringRecursive(large_cluster_points, k_for_kmeans);
         } else {
-            // Termina la recursión, el resto va al stash
-            std::cout << "    -> Finalizando recursión. Añadiendo " << large_cluster_points.size() << " puntos al stash.\n";
             m_stash.insert(m_stash.end(), large_cluster_points.begin(), large_cluster_points.end());
         }
     }
@@ -363,7 +380,8 @@ private:
 // --- Implementación de K-Means genérico (para k clústeres) ---
 // Extraído y generalizado de la lógica en SSPTree.h
 
-std::vector<int> kmeansClusteringGeneral(const std::vector<Point>& points_to_cluster, size_t k) {
+template<typename PointType>
+std::vector<int> kmeansClusteringGeneral(const std::vector<PointType>& points_to_cluster, size_t k) {
     const int MAX_ITER = 20;
     const float CONVERGENCE_TOL = 1e-6f;
     std::vector<int> assignments(points_to_cluster.size(), 0);
@@ -374,7 +392,7 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<Point>& points_to_clu
     }
 
     // Inicialización de centroides (k-means++)
-    std::vector<Point> centroids;
+    std::vector<PointType> centroids;
     centroids.reserve(k);
     static std::mt19937 gen(12345); // Semilla fija para reproducibilidad
     std::uniform_int_distribution<size_t> dist(0, points_to_cluster.size() - 1);
@@ -386,7 +404,7 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<Point>& points_to_clu
         for(size_t j = 0; j < points_to_cluster.size(); ++j) {
             float min_d = std::numeric_limits<float>::max();
             for(const auto& c : centroids) {
-                min_d = std::min(min_d, Point::distance(points_to_cluster[j], c));
+                min_d = std::min(min_d, PointType::distance(points_to_cluster[j], c));
             }
             dist_sq[j] = min_d * min_d;
             total_dist_sq += dist_sq[j];
@@ -403,14 +421,13 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<Point>& points_to_clu
         }
     }
 
-
     for (int iter = 0; iter < MAX_ITER; ++iter) {
         // Paso de Asignación
         for (size_t i = 0; i < points_to_cluster.size(); ++i) {
             float min_dist = std::numeric_limits<float>::max();
             int best_cluster = 0;
             for (size_t c_idx = 0; c_idx < k; ++c_idx) {
-                float d = Point::distance(points_to_cluster[i], centroids[c_idx]);
+                float d = PointType::distance(points_to_cluster[i], centroids[c_idx]);
                 if (d < min_dist) {
                     min_dist = d;
                     best_cluster = c_idx;
@@ -420,7 +437,7 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<Point>& points_to_clu
         }
 
         // Paso de Actualización
-        std::vector<Point> new_centroids(k);
+        std::vector<PointType> new_centroids(k);
         std::vector<int> counts(k, 0);
         for (size_t i = 0; i < points_to_cluster.size(); ++i) {
             new_centroids[assignments[i]] += points_to_cluster[i];
@@ -434,7 +451,7 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<Point>& points_to_clu
             } else { // Si un clúster queda vacío, lo reinicializamos
                 new_centroids[i] = points_to_cluster[dist(gen)];
             }
-            if (Point::distance(centroids[i], new_centroids[i]) > CONVERGENCE_TOL) {
+            if (PointType::distance(centroids[i], new_centroids[i]) > CONVERGENCE_TOL) {
                 converged = false;
             }
         }
@@ -445,6 +462,5 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<Point>& points_to_clu
 
     return assignments;
 }
-
 
 #endif // SANNS_PLAINTEXT_H

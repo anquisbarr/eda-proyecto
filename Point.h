@@ -27,6 +27,8 @@ public:
     float  operator[](std::size_t index) const; 
     float& operator[](std::size_t index);
 
+    static size_t getDimension();
+
     static Point random(float min = 0.0f, float max = 1.0f);
     static float distance(const Point& p1, const Point& p2);
 
@@ -151,6 +153,10 @@ float Point::distance(const Point& p1, const Point& p2) {
         sum += diff * diff;
     }
     return std::sqrt(sum);
+}
+
+size_t Point::getDimension() {
+    return DIM;
 }
 
 

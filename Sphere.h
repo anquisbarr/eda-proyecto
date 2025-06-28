@@ -1,21 +1,21 @@
 #ifndef SPHERE_H
 #define SPHERE_H
 
-#include "Point.h"
 #include <algorithm> // Para std::max
 
+template<typename PointType>
 struct Sphere {
-    Point center;
+    PointType center;
     float radius;
 
     Sphere() 
       : center(), radius(0.0f) {}
 
-    Sphere(const Point& c, float r)
+    Sphere(const PointType& c, float r)
       : center(c), radius(r) {}
 
-    void expandToInclude(const Sphere& other) {
-        float dist = Point::distance(center, other.center);
+    void expandToInclude(const Sphere<PointType>& other) {
+        float dist = PointType::distance(center, other.center);
 
         // Si la otra esfera ya está contenida, no hay nada que hacer.
         if (dist + other.radius <= radius + EPSILON) {
@@ -31,14 +31,14 @@ struct Sphere {
 
         // Calcula el nuevo radio y centro para la esfera combinada.
         float newRadius = (radius + dist + other.radius) / 2.0f;
-        Point newCenter = center + (other.center - center) * ((newRadius - radius) / dist);
+        PointType newCenter = center + (other.center - center) * ((newRadius - radius) / dist);
         
         this->center = newCenter;
         this->radius = newRadius;
     }
 
-    void expandToInclude(const Point& p) {
-        float dist = Point::distance(center, p);
+    void expandToInclude(const PointType& p) {
+        float dist = PointType::distance(center, p);
         if (dist <= radius) {
             return; // El punto ya está dentro.
         }
@@ -50,8 +50,8 @@ struct Sphere {
         radius = newRadius;
     }
     
-    bool intersects(const Sphere& other) const {
-        return Point::distance(center, other.center) <= (radius + other.radius);
+    bool intersects(const Sphere<PointType>& other) const {
+        return PointType::distance(center, other.center) <= (radius + other.radius);
     }
 };
 

@@ -1,179 +1,185 @@
 #ifndef SIFT_READER_HPP
 #define SIFT_READER_HPP
 
-#include <vector>
-#include <string>
 #include <iostream>
 #include <fstream>
 #include <cmath>
 #include <stdexcept>
-#include <random>
+#include <vector>
+#include <string>
 #include <algorithm>
 
-constexpr float EPSILON = 1e-8f;
+constexpr std::size_t VDIM = 128; // Dimensión de los vectores SIFT
 
-// Clase SIFTVector adaptada con los métodos de la clase Point
+// Clase simple para encapsular cada vector SIFT
 class SIFTVector {
-public:
     std::vector<float> data;
+    
+    // Método para calcular distancia euclidiana con otro vector
+    float distanceTo(const SIFTVector& other) const {
+        if (data.size() != other.data.size()) {
+            throw std::runtime_error("Vectores de diferentes dimensiones");
+        }
+        
+        float sum = 0.0f;
+        for (size_t i = 0; i < data.size(); ++i) {
+            float diff = data[i] - other.data[i];
+            sum += diff * diff;
+        }
+        return std::sqrt(sum);
+    }
+    
+public:
     int id;
-    
-    // Constructores
-    SIFTVector() : id(0) {}
-    
+
+    // Constructor
     SIFTVector(const std::vector<float>& vector_data, int vector_id = 0) 
         : data(vector_data), id(vector_id) {}
     
-    // Operadores aritméticos - suma
-    SIFTVector operator+(const SIFTVector& other) const {
+    // Constructor por defecto
+    SIFTVector() : data(VDIM), id(0) {}
+
+    SIFTVector operator+ (const SIFTVector& other) const;
+    SIFTVector& operator+=(const SIFTVector& other);
+    SIFTVector operator- (const SIFTVector& other) const;
+    SIFTVector& operator-=(const SIFTVector& other);
+    SIFTVector operator* (float scalar) const;
+    SIFTVector& operator*=(float scalar);
+    SIFTVector operator/ (float scalar) const;
+    SIFTVector& operator/=(float scalar);
+    float norm() const;
+
+    float  operator[](std::size_t index) const; 
+    float& operator[](std::size_t index);
+
+    static size_t getDimension();
+
+    static float distance(const SIFTVector& p1, const SIFTVector& p2);
+};
+    
+    // Método para obtener la dimensión
+    size_t SIFTVector::getDimension() {
+        return VDIM;
+    }
+    
+    // Método para obtener un elemento específico
+    float SIFTVector::operator[](size_t index) const {
+        if (index >= data.size()) {
+            throw std::out_of_range("Index out of range");
+        }
+        return data[index];
+    }
+    
+    // Método para obtener un elemento específico (no const)
+    float& SIFTVector::operator[](size_t index) {
+        if (index >= data.size()) {
+            throw std::out_of_range("Index out of range");
+        }
+        return data[index];
+    }
+    
+    // Operadores aritméticos
+    SIFTVector SIFTVector::operator+(const SIFTVector& other) const {
         if (data.size() != other.data.size()) {
-            throw std::invalid_argument("Vectores de diferentes dimensiones");
+            throw std::runtime_error("Vectores de diferentes dimensiones");
         }
         
         std::vector<float> result_data(data.size());
-        for (std::size_t i = 0; i < data.size(); ++i) {
+        for (size_t i = 0; i < data.size(); ++i) {
             result_data[i] = data[i] + other.data[i];
         }
         return SIFTVector(result_data, id);
     }
-    
-    SIFTVector& operator+=(const SIFTVector& other) {
+
+    SIFTVector& SIFTVector::operator+=(const SIFTVector& other) {
         if (data.size() != other.data.size()) {
-            throw std::invalid_argument("Vectores de diferentes dimensiones");
+            throw std::runtime_error("Vectores de diferentes dimensiones");
         }
         
-        for (std::size_t i = 0; i < data.size(); ++i) {
+        for (size_t i = 0; i < data.size(); ++i) {
             data[i] += other.data[i];
         }
         return *this;
     }
-    
-    // Operadores aritméticos - resta
-    SIFTVector operator-(const SIFTVector& other) const {
+
+    SIFTVector SIFTVector::operator-(const SIFTVector& other) const {
         if (data.size() != other.data.size()) {
-            throw std::invalid_argument("Vectores de diferentes dimensiones");
+            throw std::runtime_error("Vectores de diferentes dimensiones");
         }
         
         std::vector<float> result_data(data.size());
-        for (std::size_t i = 0; i < data.size(); ++i) {
+        for (size_t i = 0; i < data.size(); ++i) {
             result_data[i] = data[i] - other.data[i];
         }
         return SIFTVector(result_data, id);
     }
-    
-    SIFTVector& operator-=(const SIFTVector& other) {
+
+    SIFTVector& SIFTVector::operator-=(const SIFTVector& other) {
         if (data.size() != other.data.size()) {
-            throw std::invalid_argument("Vectores de diferentes dimensiones");
+            throw std::runtime_error("Vectores de diferentes dimensiones");
         }
         
-        for (std::size_t i = 0; i < data.size(); ++i) {
+        for (size_t i = 0; i < data.size(); ++i) {
             data[i] -= other.data[i];
         }
         return *this;
     }
-    
-    // Operadores aritméticos - multiplicación por escalar
-    SIFTVector operator*(float scalar) const {
+
+    SIFTVector SIFTVector::operator*(float scalar) const {
         std::vector<float> result_data(data.size());
-        for (std::size_t i = 0; i < data.size(); ++i) {
+        for (size_t i = 0; i < data.size(); ++i) {
             result_data[i] = data[i] * scalar;
         }
         return SIFTVector(result_data, id);
     }
-    
-    SIFTVector& operator*=(float scalar) {
-        for (std::size_t i = 0; i < data.size(); ++i) {
+
+    SIFTVector& SIFTVector::operator*=(float scalar) {
+        for (size_t i = 0; i < data.size(); ++i) {
             data[i] *= scalar;
         }
         return *this;
     }
-    
-    // Operadores aritméticos - división por escalar
-    SIFTVector operator/(float scalar) const {
-        if (std::abs(scalar) < EPSILON) {
+
+    SIFTVector SIFTVector::operator/(float scalar) const {
+        if (std::abs(scalar) < 1e-8f) {
             throw std::invalid_argument("Division by zero");
         }
         
         std::vector<float> result_data(data.size());
-        for (std::size_t i = 0; i < data.size(); ++i) {
+        for (size_t i = 0; i < data.size(); ++i) {
             result_data[i] = data[i] / scalar;
         }
         return SIFTVector(result_data, id);
     }
-    
-    SIFTVector& operator/=(float scalar) {
-        if (std::abs(scalar) < EPSILON) {
+
+    SIFTVector& SIFTVector::operator/=(float scalar) {
+        if (std::abs(scalar) < 1e-8f) {
             throw std::invalid_argument("Division by zero");
         }
         
-        for (std::size_t i = 0; i < data.size(); ++i) {
+        for (size_t i = 0; i < data.size(); ++i) {
             data[i] /= scalar;
         }
         return *this;
     }
     
     // Método para calcular la norma euclidiana
-    float norm() const {
+    float SIFTVector::norm() const {
         float sum = 0.0f;
-        for (std::size_t i = 0; i < data.size(); ++i) {
+        for (size_t i = 0; i < data.size(); ++i) {
             sum += data[i] * data[i];
         }
         return std::sqrt(sum);
     }
-    
-    // Operadores de acceso por índice
-    float operator[](std::size_t index) const {
-        if (index >= data.size()) {
-            throw std::out_of_range("Index out of range");
-        }
-        return data[index];
-    }
-    
-    float& operator[](std::size_t index) {
-        if (index >= data.size()) {
-            throw std::out_of_range("Index out of range");
-        }
-        return data[index];
-    }
-    
-    // Métodos estáticos
-    static SIFTVector random(std::size_t dimension, float min = 0.0f, float max = 1.0f) {
-        static std::random_device rd;
-        static std::mt19937 eng(rd());
-        std::uniform_real_distribution<float> dis(min, max);
-        
-        std::vector<float> coords(dimension);
-        for (auto& c : coords) {
-            c = dis(eng);
-        }
-        return SIFTVector(coords);
-    }
-    
-    static float distance(const SIFTVector& v1, const SIFTVector& v2) {
-        if (v1.data.size() != v2.data.size()) {
-            throw std::invalid_argument("Vectores de diferentes dimensiones");
-        }
-        
-        float sum = 0.0f;
-        for (std::size_t i = 0; i < v1.data.size(); ++i) {
-            float diff = v1.data[i] - v2.data[i];
-            sum += diff * diff;
-        }
-        return std::sqrt(sum);
-    }
-    
-    // Métodos originales mantenidos
-    size_t getDimension() const {
-        return data.size();
-    }
-    
-    // Método distanceTo mantenido para compatibilidad
-    float distanceTo(const SIFTVector& other) const {
-        return distance(*this, other);
-    }
-};
 
-// Clase SIFTReader mantenida igual
+    
+    // Método estático para calcular distancia (compatible con templates)
+    float SIFTVector::distance(const SIFTVector& v1, const SIFTVector& v2) {
+        return v1.distanceTo(v2);
+    }
+
+    
+// Clase para leer archivos SIFT
 class SIFTReader {
 public:
     // Método principal para leer archivos .fvecs y crear vector de objetos
@@ -189,17 +195,19 @@ public:
         int vector_id = 0;
         
         while (!file.eof()) {
+            /*
             // Leer dimensión
             int dimension;
             file.read(reinterpret_cast<char*>(&dimension), sizeof(int));
+            */
             
             if (file.eof()) break;
             
             // Leer vector de datos
-            std::vector<float> vector_data(dimension);
-            file.read(reinterpret_cast<char*>(vector_data.data()), dimension * sizeof(float));
+            std::vector<float> vector_data(VDIM);
+            file.read(reinterpret_cast<char*>(vector_data.data()), VDIM * sizeof(float));
             
-            if (file.gcount() != dimension * sizeof(float)) break;
+            if (file.gcount() != VDIM * sizeof(float)) break;
             
             // Crear objeto SIFTVector y agregarlo al vector
             vectors.emplace_back(vector_data, vector_id++);
@@ -220,7 +228,7 @@ public:
         std::cout << "Dimensión: " << vectors[0].getDimension() << std::endl;
         std::cout << "Primer vector (primeras 10 dimensiones): ";
         
-        for (size_t i = 0; i < std::min(10UL, vectors[0].getDimension()); ++i) {
+        for (size_t i = 0; i < std::min(10ULL, vectors[0].getDimension()); ++i) {
             std::cout << vectors[0][i] << " ";
         }
         std::cout << std::endl;
