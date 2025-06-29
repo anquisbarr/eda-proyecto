@@ -34,7 +34,7 @@ std::vector<PointType> naiveTopK(const PointType& query, const std::vector<Point
     }
 
     k = std::min(k, points.size());
-    auto cmp = [](const Elem& a, const Elem& b) { return a.first > b.first ? true : false; };
+    auto cmp = [](const Elem& a, const Elem& b) { return a.first < b.first; };
     std::partial_sort(dist_pairs.begin(), dist_pairs.begin() + k, dist_pairs.end(), cmp);
 
     std::vector<PointType> result;
@@ -112,7 +112,7 @@ std::vector<PointType> naiveTopKSquared(const PointType& query, const std::vecto
     }
 
     k = std::min(k, points.size());
-    auto cmp = [](const Elem& a, const Elem& b) { return a.first > b.first ? true : false; };
+    auto cmp = [](const Elem& a, const Elem& b) { return a.first < b.first; };
     std::partial_sort(dist_pairs.begin(), dist_pairs.begin() + k, dist_pairs.end(), cmp);
 
     std::vector<PointType> result;
@@ -140,7 +140,7 @@ std::vector<PointType> approximateTopK_with_distances(
         std::vector<Elem> dist_idx_pairs(points.size());
         for(size_t i = 0; i < points.size(); ++i) dist_idx_pairs[i] = {distances[i], i};
 
-        auto cmp = [](const Elem& a, const Elem& b) { return a.first > b.first ? true : false; };
+        auto cmp = [](const Elem& a, const Elem& b) { return a.first < b.first; };
         std::partial_sort(dist_idx_pairs.begin(), dist_idx_pairs.begin() + k, dist_idx_pairs.end(), cmp);
 
         std::vector<PointType> result;
@@ -164,7 +164,7 @@ std::vector<PointType> approximateTopK_with_distances(
     size_t bin_size = (points.size() + l_bins - 1) / l_bins;
     for (size_t i = 0; i < l_bins; ++i) {
         size_t start_idx = i * bin_size;
-        size_t end_idx = std::min(start_idx + bin_size, points.size());
+        size_t end_idx = std::min((i + 1) * bin_size, points.size());
         if (start_idx >= end_idx) continue;
         
         size_t min_idx_in_bin = indices[start_idx];
@@ -205,7 +205,7 @@ std::vector<PointType> linearScanKnn(
     if (allPoints.empty() || k == 0) return {};
     std::vector<long long> truncated_distances;
     truncated_distances.reserve(allPoints.size());
-    constexpr double SCALING_FACTOR_D = 1e12;
+    constexpr double SCALING_FACTOR_D = 1e6;
 
     for (const auto& p : allPoints) {
         double dist_sq_d = 0.0;
@@ -257,7 +257,7 @@ public:
 
     // Método principal para construir la estructura a partir del dataset.
     void build(const std::vector<PointType>& dataset) {
-        std::cout << "Iniciando construcción de SannsDB con " << dataset.size() << " puntos...\n";
+        std::cout << "Iniciando construccion de SannsDB con " << dataset.size() << " puntos...\n";
         m_groups.clear();
         m_stash.clear();
         // Heurística simple para elegir 'k' en k-means

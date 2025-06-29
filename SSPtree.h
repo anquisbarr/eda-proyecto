@@ -12,10 +12,13 @@
 #include "Point.h"
 #include "Sphere.h"
 
+#include "SANNS.h" // Para usar el k-means de SANNS
+
 //constexpr float EPSILON = 1e-8f;
 
 template<typename PointType>
 class SSPTree;
+
 
 template<typename PointType>
 class SSPNode {
@@ -82,6 +85,12 @@ public:
         }
     }
 };
+
+
+// Declaración adelantada de la función que usaremos.
+// Esto ayuda a mantener los headers desacoplados.
+template<typename PointType>
+std::vector<PointType> naiveTopKSquared(const PointType& query, const std::vector<PointType>& points, size_t k);
 
 template<typename PointType>
 class SSPTree {
@@ -171,7 +180,7 @@ private:
         return assignments;
     }
 
-    SSPNode<PointType>* chooseSubtree(SSPNode<PointType>* node, const PointType& point) {
+    SSPNode<PointType>* chooseSubtree(SSPNode<PointType>* node, const PointType& point) const {
         if (node->getIsLeaf()) return node;
         
         SSPNode<PointType>* bestChild = nullptr;
@@ -263,6 +272,30 @@ private:
                 break;
             }
             current = current->getParent();
+        }
+    }
+
+    // --- NUEVO HELPER PRIVADO ---
+    // Desciende por el árbol para encontrar la hoja más prometedora para un punto.
+    SSPNode<PointType>* findBestLeaf(const PointType& point) const {
+        if (!_root) return nullptr;
+        SSPNode<PointType>* node = _root;
+        while (node && !node->getIsLeaf()) {
+            node = chooseSubtree(node, point);
+        }
+        return node;
+    }
+
+    void collectPointsFromSubtree(const SSPNode<PointType>* node, std::vector<PointType>& outPoints) const {
+        if (!node) return;
+        
+        if (node->getIsLeaf()) {
+            const auto& points = node->getPoints();
+            outPoints.insert(outPoints.end(), points.begin(), points.end());
+        } else {
+            for (auto child : node->getChildren()) {
+                collectPointsFromSubtree(child, outPoints);
+            }
         }
     }
 
@@ -399,6 +432,56 @@ public:
         }
         std::reverse(result.begin(), result.end());
         return result;
+    }
+
+    // --- NUEVO MÉTODO EXPERIMENTAL ---
+    // Utiliza Best-First Search con una cola de prioridad.
+    std::vector<PointType> experimentalKnn(const PointType& query, size_t k, size_t search_budget = 256) const {
+        if (!_root) return {};
+
+        std::vector<PointType> candidate_points;
+
+        // --- Cola de Prioridad (Min-Heap) ---
+        // Almacena: {distancia_al_borde, puntero_al_nodo}
+        using QueueElement = std::pair<float, SSPNode<PointType>*>;
+        std::priority_queue<
+            QueueElement,
+            std::vector<QueueElement>,
+            std::greater<QueueElement> // std::greater hace que sea un min-heap
+        > nodes_to_visit;
+
+        // 1. Añadir la raíz a la cola
+        float root_dist = std::max(0.0f, PointType::distance(query, _root->getBoundingSphere().center) - _root->getBoundingSphere().radius);
+        nodes_to_visit.push({root_dist, _root});
+
+        size_t nodes_explored = 0;
+
+        // 2. Bucle de búsqueda del mejor primero
+        while (!nodes_to_visit.empty() && nodes_explored < search_budget) {
+            // 2a. Obtener el nodo más prometedor
+            SSPNode<PointType>* current = nodes_to_visit.top().second;
+            nodes_to_visit.pop();
+            nodes_explored++;
+
+            // 2b. Procesar el nodo
+            if (current->getIsLeaf()) {
+                // Si es una hoja, recolectamos sus puntos
+                const auto& points = current->getPoints();
+                candidate_points.insert(candidate_points.end(), points.begin(), points.end());
+            } else {
+                // Si es un nodo interno, añadimos todos sus hijos a la cola
+                for (auto child : current->getChildren()) {
+                    // Calcular la distancia al borde de la esfera del hijo
+                    float dist_to_center = PointType::distance(query, child->getBoundingSphere().center);
+                    float dist_to_edge = std::max(0.0f, dist_to_center - child->getBoundingSphere().radius);
+                    nodes_to_visit.push({dist_to_edge, child});
+                }
+            }
+        }
+        
+        // 3. Refinar los candidatos recolectados
+        // Se usa naiveTopK (con distancia real) por consistencia
+        return naiveTopK(query, candidate_points, k);
     }
 };
 

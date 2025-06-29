@@ -6,7 +6,6 @@
 #include <array>
 #include <functional>
 #include <string>
-//#include <filesystem>
 #include <fstream>
 
 #include <iomanip> // Para std::setw, std::fixed, std::setprecision
@@ -45,19 +44,6 @@ bool sameDistanceList(std::vector<float>& A, std::vector<float>& B) {
     return true; 
 }
 
-template<typename PointType>
-void collectPointsFromSubtree(const SSPNode<PointType>* node, std::vector<PointType>& outPoints) {
-    if (!node) return;
-    
-    if (node->getIsLeaf()) {
-        const auto& points = node->getPoints();
-        outPoints.insert(outPoints.end(), points.begin(), points.end());
-    } else {
-        for (auto child : node->getChildren()) {
-            collectPointsFromSubtree(child, outPoints);
-        }
-    }
-}
 
 // -------------------------------------------------------------
 // TESTS para SSP-Tree (templated)
@@ -129,7 +115,7 @@ template<typename PointType>
 bool testSannsLinearScan(const std::vector<PointType>& allPoints) {
     constexpr int K = 10;
     constexpr size_t RP_BITS = 8; 
-    constexpr size_t LS_BINS = 5; // error, con este valor saca 100% porque es < k, deberia sacar una buena presiscion con un valor como el del siguiente test
+    constexpr size_t LS_BINS = 100; // error, con este valor saca 100% porque es < k, deberia sacar una buena presiscion con un valor como el del siguiente test
 
     float total_accuracy = 0.0f;
     constexpr int NUM_TESTS = 20;
@@ -227,6 +213,53 @@ void testVisualization(const std::vector<PointType>& allPoints) {
     std::cout << std::string(80, '-') << std::endl;
 }
 
+
+// -------------------------------------------------------------
+// NUEVO TEST 8: SSP-Tree Experimental k-NN
+// -------------------------------------------------------------
+template<typename PointType>
+bool testSspTreeExperimentalKnn(const SSPTree<PointType>& tree, const std::vector<PointType>& allPoints) {
+    float total_accuracy = 0.0f;
+    constexpr int NUM_TESTS = 20;
+    constexpr int K = 10;
+    std::cout << "Ejecutando " << NUM_TESTS << " pruebas de k-NN (k=" << K << ") para SSP-Tree (Experimental)...\n";
+    
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, allPoints.size() - 1);
+    
+    for (int t = 0; t < NUM_TESTS; ++t) {
+        PointType query = allPoints[dis(gen)];
+        
+        // Llamar al nuevo método experimental
+        std::vector<PointType> experimental_res = tree.experimentalKnn(query, K);
+        
+        // Comparar con el ground truth (usando distancia al cuadrado para consistencia)
+        std::vector<PointType> brute_res = naiveTopK(query, allPoints, K);
+        
+        int correct_found = 0;
+        for (const auto& exp_p : experimental_res) {
+            for (const auto& brute_p : brute_res) {
+                if (equalPoint(exp_p, brute_p)) {
+                    correct_found++;
+                    break;
+                }
+            }
+        }
+        total_accuracy += static_cast<float>(correct_found) / K;
+    }
+    
+    float avg_accuracy = total_accuracy / NUM_TESTS;
+    std::cout << "[INFO] Test 8 (SSP-Tree Experimental): Precisión promedio (" << K << "-NN Accuracy) = " << avg_accuracy * 100.0f << "%\n";
+    if (avg_accuracy < 0.85) { // Esperamos una precisión alta para este método
+        std::cerr << "[ERROR] Test 8 (SSP-Tree Experimental): La precisión es demasiado baja.\n";
+        return false;
+    }
+    std::cout << "[OK] Test 8 (SSP-Tree Experimental) pasó con una precisión aceptable.\n";
+    return true;
+}
+
+
 int main() {
     bool overallOK = true;
 
@@ -239,7 +272,7 @@ int main() {
     // Verificar si el archivo existe usando ifstream
     std::ifstream test_file(sift_path);
     if (!test_file.is_open()) {
-        std::cerr << "❌ Error: No se encontró el archivo " << sift_path << std::endl;
+        std::cerr << "Error: No se encontró el archivo " << sift_path << std::endl;
         std::cerr << "Asegúrate de que el archivo siftsmall_base.fvecs esté en la carpeta Data\n";
         return 1;
     }
@@ -250,17 +283,18 @@ int main() {
     int cant = 6000; // Número de vectores SIFT a cargar
     
     // Cargar vectores SIFT
-    std::vector<SIFTVector> all_data = SIFTReader::readFile(sift_path);
-    std::vector<SIFTVector> sift_vectors;
-    sift_vectors.assign(all_data.begin(), all_data.begin() + std::min(cant, (int)all_data.size()));
+    std::vector<SIFTVector> sift_vectors = SIFTReader::readFile(sift_path);
+    //std::vector<SIFTVector> all_data = SIFTReader::readFile(sift_path);
+    //std::vector<SIFTVector> sift_vectors;
+    //sift_vectors.assign(all_data.begin(), all_data.begin() + std::min(cant, (int)all_data.size()));
     
     if (sift_vectors.empty()) {
-        std::cerr << "❌ Error: No se pudieron cargar los vectores SIFT\n";
+        std::cerr << "Error: No se pudieron cargar los vectores SIFT\n";
         return 1;
     }
     
-    std::cout << "✅ Cargados " << sift_vectors.size() << " vectores SIFT\n";
-    std::cout << "   Dimensión SIFT: " << sift_vectors[0].getDimension() << std::endl;
+    std::cout << "Cargados " << sift_vectors.size() << " vectores SIFT\n";
+    std::cout << "   Dimension SIFT: " << sift_vectors[0].getDimension() << std::endl;
     
     // Mostrar información del primer punto para verificar
     std::cout << "Primer vector SIFT (primeras 10 dimensiones): ";
@@ -271,9 +305,9 @@ int main() {
 
     // --- Parte 1: Pruebas del algoritmo de Clustering (Algoritmo 4) ---
     std::cout << "\n--- CONSTRUYENDO Y PROBANDO SANNS (CLUSTERING-BASED) ---\n";
-    
+
     constexpr size_t MAX_CLUSTER_SIZE_M = 50;
-    constexpr float  LARGE_CLUSTER_FRAC_ALPHA = 0.05f;
+    constexpr float  LARGE_CLUSTER_FRAC_ALPHA = 0.035f; // Fracción de puntos en clústeres grandes, init = 0.05f
     constexpr size_t CLUSTERS_TO_RETRIEVE_U = 5;
     constexpr size_t APPROX_BINS_L_CLUSTERING = 20;
 
@@ -285,19 +319,35 @@ int main() {
     std::cout << "\n=== TEST 5: SANNS Plaintext Clustering-based k-NN ===\n";
     if (!testSannsClusteringKnn<SIFTVector>(sanns_db, sift_vectors)) overallOK = false;
 
+
     // --- Parte 2: Pruebas del algoritmo Linear Scan (Algoritmo 3) ---
     std::cout << "\n=== TEST 6: SANNS Plaintext Linear Scan k-NN ===\n";
     if (!testSannsLinearScan<SIFTVector>(sift_vectors)) overallOK = false;
 
     // --- Parte 3: Test de Visualización ---
-    testVisualization<SIFTVector>(sift_vectors);
+    //testVisualization<SIFTVector>(sift_vectors);
+
+
+    // --- NUEVA PARTE: Pruebas del SSP-Tree Híbrido ---
+    std::cout << "\n--- CONSTRUYENDO Y PROBANDO SSP-TREE (EXPERIMENTAL KNN) ---\n";
+    constexpr size_t MAX_ENTRIES = 32; // Un valor razonable para el fan-out del árbol
+    SSPTree<SIFTVector> sift_tree(MAX_ENTRIES);
+    std::cout << "Construyendo SSP-Tree con " << sift_vectors.size() << " vectores SIFT...\n";
+    for(const auto& vec : sift_vectors) {
+        sift_tree.insert(vec);
+    }
+    std::cout << "SSP-Tree construido.\n";
+
+    std::cout << "\n=== TEST 8: SSP-Tree Experimental k-NN ===\n";
+    if (!testSspTreeExperimentalKnn<SIFTVector>(sift_tree, sift_vectors)) overallOK = false;
+
 
     std::cout << "\n----------------------------------------\n";
     if (overallOK) {
-        std::cout << "✅ ¡Felicidades! Todos los tests relevantes pasaron correctamente usando datos SIFT reales.\n";
+        std::cout << "¡Felicidades! Todos los tests relevantes pasaron correctamente usando datos SIFT reales.\n";
         return 0;
     } else {
-        std::cout << "❌ Rayos. Algún test falló. ¡A depurar se ha dicho!\n";
+        std::cout << "Rayos. Algun test fallo. ¡A depurar se ha dicho!\n";
         return 1;
     }
 }
