@@ -87,28 +87,55 @@ int main() {
         // Set static file directory
         httpServer.setStaticDirectory("www");
         
+        // Helper function to add CORS headers
+        auto addCorsHeaders = [](HttpResponse& res) {
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+            res.setHeader("Access-Control-Max-Age", "86400");
+        };
+        
+        // Add OPTIONS handler for CORS preflight
+        httpServer.addRoute("OPTIONS", "/api/compare", [&addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
+            res.setStatus(HttpResponse::OK);
+            res.setContentType("text/plain");
+            res.setBody("");
+        });
+        
+        httpServer.addRoute("OPTIONS", "/api/result", [&addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
+            res.setStatus(HttpResponse::OK);
+            res.setContentType("text/plain");
+            res.setBody("");
+        });
+        
         // Add original routes
-        httpServer.addRoute("GET", "/api/hello", [](const HttpRequest& req, HttpResponse& res) {
+        httpServer.addRoute("GET", "/api/hello", [&addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
             res.setStatus(HttpResponse::OK);
             res.setContentType("application/json");
             res.setBody("{\"message\": \"Hello, World!\", \"method\": \"" + req.getMethod() + "\"}");
         });
         
-        httpServer.addRoute("GET", "/api/info", [](const HttpRequest& req, HttpResponse& res) {
+        httpServer.addRoute("GET", "/api/info", [&addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
             res.setStatus(HttpResponse::OK);
             res.setContentType("application/json");
             res.setBody("{\"server\": \"C++ HTTP Server with Algorithm Service\", \"version\": \"1.0.0\", \"path\": \"" + req.getPath() + "\"}");
         });
         
         // Add dataset info endpoint
-        httpServer.addRoute("GET", "/api/dataset", [&algoService](const HttpRequest& req, HttpResponse& res) {
+        httpServer.addRoute("GET", "/api/dataset", [&algoService, &addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
             res.setStatus(HttpResponse::OK);
             res.setContentType("application/json");
             res.setBody("{\"info\": \"" + algoService.getDatasetInfo() + "\"}");
         });
         
         // Add available queries endpoint
-        httpServer.addRoute("GET", "/api/queries", [&algoService](const HttpRequest& req, HttpResponse& res) {
+        httpServer.addRoute("GET", "/api/queries", [&algoService, &addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
             auto queries = algoService.getAvailableQueries(50);
             std::ostringstream json;
             json << "{\"available_queries\":[";
@@ -124,7 +151,8 @@ int main() {
         });
         
         // Add algorithm comparison endpoint
-        httpServer.addRoute("POST", "/api/compare", [&algoService](const HttpRequest& req, HttpResponse& res) {
+        httpServer.addRoute("POST", "/api/compare", [&algoService, &addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
             try {
                 // Parse request body for query_index and k
                 std::string body = req.getBody();
@@ -184,7 +212,8 @@ int main() {
         });
         
         // Add job status/result endpoint
-        httpServer.addRoute("GET", "/api/result", [&algoService](const HttpRequest& req, HttpResponse& res) {
+        httpServer.addRoute("GET", "/api/result", [&algoService, &addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
             std::string job_id = req.getQueryParam("job_id");
             if (job_id.empty()) {
                 res.setStatus(HttpResponse::BAD_REQUEST);
@@ -201,7 +230,8 @@ int main() {
         });
         
         // Add cache management endpoint
-        httpServer.addRoute("DELETE", "/api/cache", [](const HttpRequest& req, HttpResponse& res) {
+        httpServer.addRoute("DELETE", "/api/cache", [&addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
             std::string cache_dir = "algorithm_cache";
             std::string rm_cmd = "rm -rf " + cache_dir;
             int result = system(rm_cmd.c_str());
@@ -216,7 +246,8 @@ int main() {
         });
         
         // Add cache status endpoint
-        httpServer.addRoute("GET", "/api/cache", [](const HttpRequest& req, HttpResponse& res) {
+        httpServer.addRoute("GET", "/api/cache", [&addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
             std::string cache_dir = "algorithm_cache";
             std::ifstream meta_file(cache_dir + "/cache_metadata.txt");
             
