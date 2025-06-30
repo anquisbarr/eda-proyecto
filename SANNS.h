@@ -237,6 +237,14 @@ public:
         std::vector<Cluster> clusters;
     };
 
+    // Estructura para encapsular los parámetros
+    struct Parameters {
+        size_t max_cluster_size_m;
+        float large_cluster_fraction_alpha;
+        size_t clusters_to_retrieve_u;
+        size_t approx_topk_bins_l;
+    };
+
 private:
     std::vector<Group> m_groups;
     std::vector<PointType> m_stash;
@@ -248,12 +256,32 @@ private:
     size_t m_approx_topk_bins_l; // Bins para approximateTopK
 
 public:
+    // Constructor por defecto
+    SannsDB() : m_max_cluster_size_m(50), 
+                m_large_cluster_fraction_alpha(0.05f),
+                m_clusters_to_retrieve_u(5),
+                m_approx_topk_bins_l(20) {}
+    
+    // Constructor con parámetros
+    // max_cluster_size_m: Tamaño máximo de un clúster (m en el paper)
+    // large_cluster_fraction_alpha: Fracción de puntos que forman clústeres grandes (α en el paper)
+    // clusters_to_retrieve_u: Número de clústeres a recuperar (u en el paper)
+    // approx_bins: Número de bins para ApproximateTopK (l en el paper)
     SannsDB(size_t max_cluster_size, float large_cluster_fraction, size_t clusters_to_retrieve, size_t approx_bins)
         : m_max_cluster_size_m(max_cluster_size), 
           m_large_cluster_fraction_alpha(large_cluster_fraction),
           m_clusters_to_retrieve_u(clusters_to_retrieve),
           m_approx_topk_bins_l(approx_bins)
     {}
+
+    // Métodos públicos para acceso a datos (necesarios para SecureSANNS)
+    const std::vector<Group>& getGroups() const { return m_groups; }
+    const std::vector<PointType>& getStash() const { return m_stash; }
+    
+    Parameters getParams() const {
+        return {m_max_cluster_size_m, m_large_cluster_fraction_alpha, 
+                m_clusters_to_retrieve_u, m_approx_topk_bins_l};
+    }
 
     // Método principal para construir la estructura a partir del dataset.
     void build(const std::vector<PointType>& dataset) {
