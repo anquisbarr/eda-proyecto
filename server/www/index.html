@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C++ Algorithm Comparison Server</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .endpoint {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        .input-group label {
+            display: inline-block;
+            width: 120px;
+            font-weight: bold;
+        }
+        .input-group input {
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            width: 100px;
+        }
+        .loading {
+            color: #007bff;
+            font-weight: bold;
+        }
+        .algorithm-result {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #fff;
+        }
+        .precision-high { color: #28a745; }
+        .precision-medium { color: #ffc107; }
+        .precision-low { color: #dc3545; }
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        .comparison-table th, .comparison-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .comparison-table th {
+            background-color: #f2f2f2;
+        }
+        .match { color: #28a745; }
+        .no-match { color: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧮 C++ Algorithm Comparison Server</h1>
+        <p>Compare three k-NN algorithms: SANNS Clustering, SANNS Linear Scan, and SSP-Tree Experimental.</p>
+        
+        <div class="section">
+            <h2>Dataset Information:</h2>
+            <div id="dataset-info">Loading...</div>
+            <button onclick="loadDatasetInfo()">Refresh Dataset Info</button>
+        </div>
+        
+        <div class="section">
+            <h2>Algorithm Comparison:</h2>
+            <div class="input-group">
+                <label for="query-index">Query Index:</label>
+                <input type="number" id="query-index" value="0" min="0" max="9999">
+                <button onclick="loadQueries()">Show Available Queries</button>
+            </div>
+            <div class="input-group">
+                <label for="k-value">K Value:</label>
+                <input type="number" id="k-value" value="10" min="1" max="100">
+            </div>
+            <button id="start-btn" onclick="startComparison()">Start Algorithm Comparison</button>
+            <button id="check-btn" onclick="checkResult()" style="display:none;">Check Result</button>
+            
+            <div id="comparison-result"></div>
+        </div>
+        
+        <div class="section">
+            <h2>Available API Endpoints:</h2>
+            <div class="endpoint">GET /api/dataset</div>
+            <div class="endpoint">GET /api/queries</div>
+            <div class="endpoint">POST /api/compare</div>
+            <div class="endpoint">GET /api/result?job_id=&lt;job_id&gt;</div>
+        </div>
+        
+        <div class="section">
+            <h2>Test Basic APIs:</h2>
+            <button onclick="testHello()">Test /api/hello</button>
+            <button onclick="testInfo()">Test /api/info</button>
+            
+            <div id="result"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentJobId = null;
+        let checkInterval = null;
+
+        function displayResult(response) {
+            document.getElementById('result').textContent = JSON.stringify(response, null, 2);
+        }
+
+        function displayComparisonResult(result) {
+            const container = document.getElementById('comparison-result');
+            
+            if (!result.completed) {
+                container.innerHTML = '<div class="loading">Job in progress... Please wait.</div>';
+                return;
+            }
+
+            let html = '<h3>Comparison Results</h3>';
+            html += `<p><strong>Job ID:</strong> ${result.job_id}</p>`;
+            html += `<p><strong>Query:</strong> ${result.query_info}</p>`;
+            html += `<p><strong>K:</strong> ${result.k}</p>`;
+            html += `<p><strong>Total Time:</strong> ${result.total_time_ms.toFixed(2)} ms</p>`;
+
+            if (result.results && result.results.length > 0) {
+                html += '<div class="algorithms-container">';
+                
+                result.results.forEach(algo => {
+                    html += '<div class="algorithm-result">';
+                    html += `<h4>${algo.algorithm_name}</h4>`;
+                    
+                    if (algo.success) {
+                        const precisionClass = algo.precision >= 0.8 ? 'precision-high' : 
+                                             algo.precision >= 0.5 ? 'precision-medium' : 'precision-low';
+                        html += `<p><strong>Precision:</strong> <span class="${precisionClass}">${(algo.precision * 100).toFixed(1)}%</span></p>`;
+                        html += `<p><strong>Execution Time:</strong> ${algo.execution_time_ms.toFixed(2)} ms</p>`;
+                        
+                        if (algo.distances_and_matches && algo.distances_and_matches.length > 0) {
+                            html += '<table class="comparison-table">';
+                            html += '<tr><th>Rank</th><th>Distance²</th><th>Match</th></tr>';
+                            
+                            algo.distances_and_matches.forEach((item, index) => {
+                                const matchClass = item.is_match ? 'match' : 'no-match';
+                                const matchText = item.is_match ? '✓' : '✗';
+                                html += `<tr>`;
+                                html += `<td>${index + 1}</td>`;
+                                html += `<td>${item.distance_squared.toFixed(4)}</td>`;
+                                html += `<td class="${matchClass}">${matchText}</td>`;
+                                html += `</tr>`;
+                            });
+                            
+                            html += '</table>';
+                        }
+                    } else {
+                        html += `<p><strong>Error:</strong> ${algo.error_message}</p>`;
+                    }
+                    
+                    html += '</div>';
+                });
+                
+                html += '</div>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        async function loadDatasetInfo() {
+            try {
+                const response = await fetch('/api/dataset');
+                const data = await response.json();
+                document.getElementById('dataset-info').textContent = data.info;
+            } catch (error) {
+                document.getElementById('dataset-info').textContent = 'Error loading dataset info: ' + error.message;
+            }
+        }
+
+        async function loadQueries() {
+            try {
+                const response = await fetch('/api/queries');
+                const data = await response.json();
+                if (data.available_queries && data.available_queries.length > 0) {
+                    const max = Math.max(...data.available_queries);
+                    document.getElementById('query-index').max = max;
+                    alert(`Available query indices: 0 to ${max} (${data.available_queries.length} total)`);
+                }
+            } catch (error) {
+                alert('Error loading queries: ' + error.message);
+            }
+        }
+
+        async function startComparison() {
+            const queryIndex = parseInt(document.getElementById('query-index').value);
+            const k = parseInt(document.getElementById('k-value').value);
+            
+            if (isNaN(queryIndex) || isNaN(k) || k <= 0) {
+                alert('Please enter valid query index and k value');
+                return;
+            }
+
+            try {
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('comparison-result').innerHTML = '<div class="loading">Starting comparison...</div>';
+
+                const response = await fetch('/api/compare', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query_index: queryIndex, k: k })
+                });
+                
+                const data = await response.json();
+                
+                if (data.job_id) {
+                    currentJobId = data.job_id;
+                    document.getElementById('check-btn').style.display = 'inline-block';
+                    document.getElementById('comparison-result').innerHTML = `<div class="loading">Job started with ID: ${data.job_id}. Checking progress...</div>`;
+                    
+                    // Start checking for results every 2 seconds
+                    checkInterval = setInterval(checkResult, 2000);
+                    checkResult(); // Check immediately
+                } else {
+                    document.getElementById('comparison-result').innerHTML = `<div style="color: red;">Error: ${data.error}</div>`;
+                    document.getElementById('start-btn').disabled = false;
+                }
+            } catch (error) {
+                document.getElementById('comparison-result').innerHTML = `<div style="color: red;">Error: ${error.message}</div>`;
+                document.getElementById('start-btn').disabled = false;
+            }
+        }
+
+        async function checkResult() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`/api/result?job_id=${currentJobId}`);
+                const result = await response.json();
+                
+                displayComparisonResult(result);
+                
+                if (result.completed) {
+                    // Job completed, stop checking
+                    if (checkInterval) {
+                        clearInterval(checkInterval);
+                        checkInterval = null;
+                    }
+                    document.getElementById('start-btn').disabled = false;
+                    document.getElementById('check-btn').style.display = 'none';
+                    currentJobId = null;
+                }
+            } catch (error) {
+                document.getElementById('comparison-result').innerHTML = `<div style="color: red;">Error checking result: ${error.message}</div>`;
+                if (checkInterval) {
+                    clearInterval(checkInterval);
+                    checkInterval = null;
+                }
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('check-btn').style.display = 'none';
+            }
+        }
+
+        async function testHello() {
+            try {
+                const response = await fetch('/api/hello');
+                const data = await response.json();
+                displayResult(data);
+            } catch (error) {
+                displayResult({ error: error.message });
+            }
+        }
+
+        async function testInfo() {
+            try {
+                const response = await fetch('/api/info');
+                const data = await response.json();
+                displayResult(data);
+            } catch (error) {
+                displayResult({ error: error.message });
+            }
+        }
+
+        // Load dataset info on page load
+        window.onload = function() {
+            loadDatasetInfo();
+        };
+    </script>
+</body>
+</html> 

@@ -9,7 +9,11 @@
 #include "SANNS.h"
 #include "SSPTree.h"
 
-#include <chrono>
+// Incluir la nueva implementación de SANNS
+#include "SANNS.h"
+
+// Incluir el lector SIFT
+#include "SIFTReader.hpp"
 
 static constexpr float FLOAT_TOL = 1e-6f;
 
@@ -211,10 +215,34 @@ void print_results_table(const std::map<std::string, std::vector<BenchmarkResult
 
 
 int main() {
-    // --- Cargar el dataset completo una vez ---
-    std::cout << "=== CARGANDO DATASET SIFT COMPLETO ===\n";
-    std::vector<SIFTVector> full_sift_dataset = SIFTReader::readFile("../Data/sift_base.fvecs");
-    if (full_sift_dataset.empty()) {
+    bool overallOK = true;
+
+    // --- Cargar datos SIFT reales ---
+    std::cout << "=== CARGANDO DATASET SIFT ===\n";
+    
+    // Ruta al archivo SIFT, cambia el nombre de la carpeta si es necesario
+    std::string sift_path = "siftsmall_base.fvecs";
+    
+    // Verificar si el archivo existe usando ifstream
+    std::ifstream test_file(sift_path);
+    if (!test_file.is_open()) {
+        std::cerr << "Error: No se encontró el archivo " << sift_path << std::endl;
+        std::cerr << "Asegúrate de que el archivo siftsmall_base.fvecs esté en la carpeta Data\n";
+        return 1;
+    }
+    test_file.close();
+    
+    std::cout << "Cargando datos SIFT desde: " << sift_path << std::endl;
+
+    int cant = 6000; // Número de vectores SIFT a cargar
+    
+    // Cargar vectores SIFT
+    std::vector<SIFTVector> sift_vectors = SIFTReader::readFile(sift_path);
+    //std::vector<SIFTVector> all_data = SIFTReader::readFile(sift_path);
+    //std::vector<SIFTVector> sift_vectors;
+    //sift_vectors.assign(all_data.begin(), all_data.begin() + std::min(cant, (int)all_data.size()));
+    
+    if (sift_vectors.empty()) {
         std::cerr << "Error: No se pudieron cargar los vectores SIFT\n";
         return 1;
     }

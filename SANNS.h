@@ -8,7 +8,7 @@
 #include <algorithm> // Para std::shuffle, std::sort, etc.
 #include <random>
 #include "Point.h"
-#include "SSPtree.h" // Usaremos el k-means de aquí
+#include "SSPTree.h" // Usaremos el k-means de aquí
 
 using namespace std;
 
@@ -289,7 +289,7 @@ public:
         m_groups.clear();
         m_stash.clear();
         // Heurística simple para elegir 'k' en k-means
-        size_t initial_k = std::max(2ULL, static_cast<size_t>(std::sqrt(dataset.size()) / 2.0));
+        size_t initial_k = std::max(static_cast<size_t>(2), static_cast<size_t>(std::sqrt(dataset.size()) / 2.0));
         initial_k = std::min(initial_k, dataset.size());
         balancedClusteringRecursive(dataset, initial_k);
         //balancedClusteringRecursive(dataset);
@@ -388,7 +388,7 @@ private:
             k_for_kmeans *= 2; // Duplicar el número de clústeres para el siguiente intento
         } else {
             // Progreso normal, reiniciar k para la siguiente recursión
-            size_t next_k = std::max(2ULL, static_cast<size_t>(std::sqrt(large_cluster_points.size()) / 2.0));
+            size_t next_k = std::max(static_cast<size_t>(2), static_cast<size_t>(std::sqrt(large_cluster_points.size()) / 2.0));
             k_for_kmeans = std::min(next_k, large_cluster_points.size());
         }
 

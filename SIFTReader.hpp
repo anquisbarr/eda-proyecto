@@ -228,7 +228,7 @@ public:
         std::cout << "Dimensión: " << vectors[0].getDimension() << std::endl;
         std::cout << "Primer vector (primeras 10 dimensiones): ";
         
-        for (size_t i = 0; i < std::min(10ULL, vectors[0].getDimension()); ++i) {
+        for (size_t i = 0; i < std::min(static_cast<size_t>(10), vectors[0].getDimension()); ++i) {
             std::cout << vectors[0][i] << " ";
         }
         std::cout << std::endl;

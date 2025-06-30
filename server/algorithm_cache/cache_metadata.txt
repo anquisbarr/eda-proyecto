@@ -1,0 +1,3 @@
+cache_timestamp=1751257140
+sift_vector_count=100
+sift_dimension=128
