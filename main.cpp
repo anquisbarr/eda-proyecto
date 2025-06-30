@@ -64,12 +64,39 @@ template<typename PointType>
 BenchmarkResult testSannsClusteringKnn(const std::vector<PointType>& allPoints) {
     Timer timer;
     double total_build_time = 0;
-    
+    /*
     // --- Medición del Pre-cómputo ---
-    constexpr size_t MAX_CLUSTER_SIZE_M = 50;
-    constexpr float  LARGE_CLUSTER_FRAC_ALPHA = 0.05f;
-    constexpr size_t CLUSTERS_TO_RETRIEVE_U = 5;
-    constexpr size_t APPROX_BINS_L_CLUSTERING = 50;
+    constexpr size_t MAX_CLUSTER_SIZE_M = 500; //50
+    constexpr size_t CLUSTERS_TO_RETRIEVE_U = 50; //5
+    constexpr size_t APPROX_BINS_L_CLUSTERING = 500; //50
+    */
+
+    auto N = allPoints.size();
+   
+    // 0.05 es un valor estándar y robusto. Significa: "si los puntos problemáticos
+    // son menos del 5% del total, no vale la pena recursar, muévelos al stash".
+    constexpr float  LARGE_CLUSTER_FRAC_ALPHA = 0.05f; //0.05
+
+    // Constante de ajuste. Un valor entre 2 y 5 suele funcionar bien.
+    // Empecemos con 4.0 para un crecimiento moderado.
+    const double M_CONSTANT = 4.0; 
+    size_t MAX_CLUSTER_SIZE_M = static_cast<size_t>(M_CONSTANT * std::sqrt(N));
+    // Añadir límites para evitar valores absurdos en los extremos.
+    MAX_CLUSTER_SIZE_M = std::max(static_cast<size_t>(3 * 10), MAX_CLUSTER_SIZE_M); // Mínimo de 30, k=10
+    MAX_CLUSTER_SIZE_M = std::min(static_cast<size_t>(2000), MAX_CLUSTER_SIZE_M);  // Máximo de 2000
+
+    // Constante de ajuste. Un valor entre 1.0 y 2.0 es un buen punto de partida.
+    const double U_CONSTANT = 1.5; 
+    size_t CLUSTERS_TO_RETRIEVE_U = static_cast<size_t>(U_CONSTANT * std::log2(N));
+    // Añadir límites.
+    CLUSTERS_TO_RETRIEVE_U = std::max(static_cast<size_t>(3), CLUSTERS_TO_RETRIEVE_U); // Mínimo de 3 clústeres
+    CLUSTERS_TO_RETRIEVE_U = std::min(static_cast<size_t>(500), CLUSTERS_TO_RETRIEVE_U); // Máximo de 50
+
+    // Queremos que L sea significativamente mayor que U para una buena aproximación.
+    // Un factor de 5x a 10x es razonable.
+    const double L_FACTOR = 8.0; 
+    size_t APPROX_BINS_L_CLUSTERING = static_cast<size_t>(L_FACTOR * CLUSTERS_TO_RETRIEVE_U);
+
 
     timer.start();
     SannsDB<PointType> sanns_db(MAX_CLUSTER_SIZE_M, LARGE_CLUSTER_FRAC_ALPHA, CLUSTERS_TO_RETRIEVE_U, APPROX_BINS_L_CLUSTERING);
@@ -145,9 +172,32 @@ template<typename PointType>
 BenchmarkResult testSspTreeExperimentalKnn(const std::vector<PointType>& allPoints) {
     Timer timer;
     double total_build_time = 0;
-    
+    /*
     constexpr size_t MAX_ENTRIES = 32;
     constexpr size_t SEARCH_BUDGET = 256;
+    */
+
+    auto N = allPoints.size();
+    // Constante de ajuste. Un valor entre 8 y 12 puede funcionar bien.
+    const double ME_CONSTANT = 10.0;
+    size_t MAX_ENTRIES = static_cast<size_t>(ME_CONSTANT * std::log10(N));
+    // Añadir límites para que no sea ni demasiado pequeño ni demasiado grande.
+    // Un árbol binario (2) es el mínimo, pero poco eficiente. Empecemos en 8.
+    MAX_ENTRIES = std::max(static_cast<size_t>(8), MAX_ENTRIES);
+    // Un fan-out demasiado grande (> 64) puede ralentizar el descenso.
+    MAX_ENTRIES = std::min(static_cast<size_t>(64), MAX_ENTRIES);
+
+    // Constante de ajuste. Este valor controla directamente el "esfuerzo" de la búsqueda.
+    // Un valor entre 5 y 10 es un buen punto de partida.
+    const double SB_CONSTANT = 8.0; 
+    size_t SEARCH_BUDGET = static_cast<size_t>(SB_CONSTANT * std::sqrt(N));
+
+    // Añadir límites.
+    // Un presupuesto mínimo para asegurar que se explore más allá de la raíz y sus hijos.
+    SEARCH_BUDGET = std::max(static_cast<size_t>(64), SEARCH_BUDGET);
+    // Un presupuesto máximo para evitar que las consultas se vuelvan demasiado lentas en datasets gigantes.
+    SEARCH_BUDGET = std::min(static_cast<size_t>(4096), SEARCH_BUDGET);
+
 
     timer.start();
     SSPTree<PointType> sift_tree(MAX_ENTRIES);
@@ -221,7 +271,7 @@ int main() {
     std::cout << "Cargados " << full_sift_dataset.size() << " vectores SIFT.\n";
 
     // --- Definir los tamaños de dataset para el benchmark ---
-    std::vector<int> dataset_sizes = {100, 1000, 10000};
+    std::vector<int> dataset_sizes = {100000};
     
     // Mapa para almacenar todos los resultados
     std::map<std::string, std::vector<BenchmarkResult>> all_results;
