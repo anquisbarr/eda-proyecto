@@ -10,6 +10,10 @@
 #include "Point.h"
 #include "SSPTree.h" // Usaremos el k-means de aquí
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 using namespace std;
 
 // Declaración adelantada para el helper k-means
@@ -27,10 +31,14 @@ std::vector<PointType> naiveTopK(const PointType& query, const std::vector<Point
     }
     
     using Elem = std::pair<float, PointType>;
-    std::vector<Elem> dist_pairs;
-    dist_pairs.reserve(points.size());
-    for (const auto& p : points) {
-        dist_pairs.emplace_back(PointType::distance(query, p), p);
+    std::vector<Elem> dist_pairs(points.size());
+    
+    // Parallelize distance calculations for naiveTopK
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(dynamic, 1000)
+#endif
+    for (size_t i = 0; i < points.size(); ++i) {
+        dist_pairs[i] = std::make_pair(PointType::distance(query, points[i]), points[i]);
     }
 
     k = std::min(k, points.size());
@@ -100,15 +108,19 @@ std::vector<PointType> naiveTopKSquared(const PointType& query, const std::vecto
     if (points.empty() || k == 0) return {};
     
     using Elem = std::pair<double, PointType>;
-    std::vector<Elem> dist_pairs;
-    dist_pairs.reserve(points.size());
-    for (const auto& p : points) {
+    std::vector<Elem> dist_pairs(points.size());
+    
+    // Parallelize distance calculations for naiveTopKSquared
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(dynamic, 1000)
+#endif
+    for (size_t i = 0; i < points.size(); ++i) {
         double dist_sq = 0.0;
-        for(size_t i=0; i<PointType::getDimension(); ++i) {
-            double diff = static_cast<double>(query[i]) - static_cast<double>(p[i]);
+        for(size_t d = 0; d < PointType::getDimension(); ++d) {
+            double diff = static_cast<double>(query[d]) - static_cast<double>(points[i][d]);
             dist_sq += diff * diff;
         }
-        dist_pairs.emplace_back(dist_sq, p);
+        dist_pairs[i] = std::make_pair(dist_sq, points[i]);
     }
 
     k = std::min(k, points.size());
@@ -286,12 +298,24 @@ public:
     // Método principal para construir la estructura a partir del dataset.
     void build(const std::vector<PointType>& dataset) {
         std::cout << "Iniciando construccion de SannsDB con " << dataset.size() << " puntos...\n";
+        
+#ifdef _OPENMP
+        std::cout << "Using OpenMP with " << omp_get_max_threads() << " threads for SANNS construction\n";
+#endif
+        
         m_groups.clear();
         m_stash.clear();
         // Heurística simple para elegir 'k' en k-means
         size_t initial_k = std::max(static_cast<size_t>(2), static_cast<size_t>(std::sqrt(dataset.size()) / 2.0));
         initial_k = std::min(initial_k, dataset.size());
-        balancedClusteringRecursive(dataset, initial_k);
+        
+        // More aggressive initial clustering for better group creation
+        // Higher initial k forces more subdivision from the start
+        size_t aggressive_k = std::max(initial_k * 2, static_cast<size_t>(std::sqrt(dataset.size()) * 1.5));
+        aggressive_k = std::min(aggressive_k, dataset.size() / 10); // But not too many
+        
+        std::cout << "Starting balanced clustering with aggressive initial k=" << aggressive_k << " (was " << initial_k << ")\n";
+        balancedClusteringRecursive(dataset, aggressive_k);
         //balancedClusteringRecursive(dataset);
         std::cout << "Construccion finalizada. Se crearon " << m_groups.size() 
                   << " grupos y un stash de " << m_stash.size() << " puntos.\n";
@@ -344,6 +368,11 @@ private:
     // Implementación del "Balanced Clustering" recursivo (Sección 3.3)
     void balancedClusteringRecursive(const std::vector<PointType>& points, size_t& k_for_kmeans) {
         if (points.empty()) return;
+
+        // Progress reporting for large clustering operations
+        if (points.size() > 5000) {
+            std::cout << "  Balanced clustering: processing " << points.size() << " points with k=" << k_for_kmeans << "\n";
+        }
 
         // Heurística simple para elegir 'k' en k-means
         //size_t k_for_kmeans = std::max(static_cast<size_t>(2), static_cast<size_t>(std::sqrt(points.size()) / 2.0));
@@ -418,6 +447,12 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<PointType>& points_to
          for(size_t i = 0; i < points_to_cluster.size(); ++i) assignments[i] = i;
          return assignments;
     }
+    
+    // Add progress reporting for large k-means operations
+    bool show_progress = points_to_cluster.size() > 10000;
+    if (show_progress) {
+        std::cout << "  K-means clustering " << points_to_cluster.size() << " points into " << k << " clusters...\n";
+    }
 
     // Inicialización de centroides (k-means++)
     std::vector<PointType> centroids;
@@ -429,6 +464,11 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<PointType>& points_to
     std::vector<float> dist_sq(points_to_cluster.size());
     for(size_t i = 1; i < k; ++i) {
         float total_dist_sq = 0;
+        
+        // Parallelize distance calculations for k-means++ initialization
+#ifdef _OPENMP
+        #pragma omp parallel for reduction(+:total_dist_sq) schedule(dynamic, 1000)
+#endif
         for(size_t j = 0; j < points_to_cluster.size(); ++j) {
             float min_d = std::numeric_limits<float>::max();
             for(const auto& c : centroids) {
@@ -450,7 +490,14 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<PointType>& points_to
     }
 
     for (int iter = 0; iter < MAX_ITER; ++iter) {
-        // Paso de Asignación
+        if (show_progress) {
+            std::cout << "    K-means iteration " << (iter + 1) << "/" << MAX_ITER << "...\n";
+        }
+        
+        // Paso de Asignación (parallelized with OpenMP)
+#ifdef _OPENMP
+        #pragma omp parallel for schedule(dynamic, 1000)
+#endif
         for (size_t i = 0; i < points_to_cluster.size(); ++i) {
             float min_dist = std::numeric_limits<float>::max();
             int best_cluster = 0;
@@ -464,15 +511,34 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<PointType>& points_to
             assignments[i] = best_cluster;
         }
 
-        // Paso de Actualización
+        // Paso de Actualización (parallelized with OpenMP)
         std::vector<PointType> new_centroids(k);
         std::vector<int> counts(k, 0);
+        
+#ifdef _OPENMP
+        // Use critical sections for thread-safe updates
+        #pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < points_to_cluster.size(); ++i) {
+            int cluster_id = assignments[i];
+            #pragma omp critical
+            {
+                new_centroids[cluster_id] += points_to_cluster[i];
+                counts[cluster_id]++;
+            }
+        }
+#else
         for (size_t i = 0; i < points_to_cluster.size(); ++i) {
             new_centroids[assignments[i]] += points_to_cluster[i];
             counts[assignments[i]]++;
         }
+#endif
 
         bool converged = true;
+        
+        // Parallelize centroid finalization and convergence check
+#ifdef _OPENMP
+        #pragma omp parallel for
+#endif
         for (size_t i = 0; i < k; ++i) {
             if (counts[i] > 0) {
                 new_centroids[i] /= static_cast<float>(counts[i]);
@@ -485,7 +551,16 @@ std::vector<int> kmeansClusteringGeneral(const std::vector<PointType>& points_to
         }
 
         centroids = new_centroids;
-        if (converged) break;
+        if (converged) {
+            if (show_progress) {
+                std::cout << "  K-means converged after " << (iter + 1) << " iterations\n";
+            }
+            break;
+        }
+    }
+    
+    if (show_progress) {
+        std::cout << "  K-means completed\n";
     }
 
     return assignments;

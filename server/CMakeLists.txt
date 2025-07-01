@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find required packages
 find_package(Threads REQUIRED)
+find_package(OpenMP)
 
 # Include directories for the algorithm headers
 include_directories(${CMAKE_SOURCE_DIR}/..)
@@ -25,6 +26,14 @@ target_include_directories(http_server PRIVATE include)
 
 # Link libraries
 target_link_libraries(http_server PRIVATE Threads::Threads)
+
+# Link OpenMP if available
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(http_server PRIVATE OpenMP::OpenMP_CXX)
+    message(STATUS "OpenMP found and will be used for parallel processing")
+else()
+    message(STATUS "OpenMP not found, using std::async for parallelization")
+endif()
 
 # Compiler flags
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
