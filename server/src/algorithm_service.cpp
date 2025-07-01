@@ -42,7 +42,7 @@ bool AlgorithmService::initialize(const std::string& sift_file_path) {
         
         // Use only a portion of the dataset for faster processing and reduced memory usage
         size_t original_size = sift_vectors_.size();
-        size_t reduced_size = original_size / 16;  // Use 1/8 of dataset for testing OpenMP performance
+        size_t reduced_size = original_size / 32;  // Use 1/8 of dataset for testing OpenMP performance
         sift_vectors_.resize(reduced_size);
         std::cout << "Using reduced dataset: " << reduced_size << " vectors (reduced from " << original_size << ") for testing" << std::endl;
         
@@ -115,11 +115,14 @@ bool AlgorithmService::initialize(const std::string& sift_file_path) {
         unsigned int num_threads = std::thread::hardware_concurrency();
         if (num_threads == 0) num_threads = 4; // fallback
         
+        // Limit threads to 12 to prevent overheating
+        num_threads = std::min(num_threads, 12u);
+        
 #ifdef _OPENMP
         omp_set_num_threads(num_threads);
-        std::cout << "OpenMP available with " << num_threads << " threads" << std::endl;
+        std::cout << "OpenMP available with " << num_threads << " threads (limited to 12 for thermal management)" << std::endl;
 #else
-        std::cout << "Using " << num_threads << " threads (std::async)" << std::endl;
+        std::cout << "Using " << num_threads << " threads (std::async, limited to 12 for thermal management)" << std::endl;
 #endif
 
             // Memory usage warning for large datasets
