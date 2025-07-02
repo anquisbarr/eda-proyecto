@@ -73,8 +73,8 @@ int main() {
 
         std::cout << "Loading SIFT dataset..." << std::endl;
         // if (!algoService.initialize("../siftsmall_query.fvecs")) {
-        if (!algoService.initialize("../sift_base.fvecs")) {
-            std::cerr << "Failed to load SIFT dataset. Check if siftsmall_query.fvecs exists in parent directory." << std::endl;
+        if (!algoService.initializeWithQueries("../sift_base.fvecs", "../sift_query.fvecs")) {
+            std::cerr << "Failed to load SIFT dataset. Check if sift_base.fvecs and sift_query.fvecs exist in parent directory." << std::endl;
             return 1;
         }
         std::cout << "SIFT dataset loaded successfully!" << std::endl;
@@ -105,6 +105,13 @@ int main() {
         });
 
         httpServer.addRoute("OPTIONS", "/api/result", [&addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
+            res.setStatus(HttpResponse::OK);
+            res.setContentType("text/plain");
+            res.setBody("");
+        });
+
+        httpServer.addRoute("OPTIONS", "/api/context", [&addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
             addCorsHeaders(res);
             res.setStatus(HttpResponse::OK);
             res.setContentType("text/plain");
@@ -145,6 +152,25 @@ int main() {
                 json << queries[i];
             }
             json << "]}";
+
+            res.setStatus(HttpResponse::OK);
+            res.setContentType("application/json");
+            res.setBody(json.str());
+        });
+
+        // Add query context endpoint
+        httpServer.addRoute("GET", "/api/context", [&algoService, &addCorsHeaders](const HttpRequest& req, HttpResponse& res) {
+            addCorsHeaders(res);
+            auto context = algoService.getQueryContext();
+            
+            std::ostringstream json;
+            json << "{";
+            json << "\"max_dataset_index\":" << context.max_dataset_index << ",";
+            json << "\"num_query_vectors\":" << context.num_query_vectors << ",";
+            json << "\"dataset_size\":" << context.dataset_size << ",";
+            json << "\"dataset_info\":\"" << context.dataset_info << "\",";
+            json << "\"query_info\":\"" << context.query_info << "\"";
+            json << "}";
 
             res.setStatus(HttpResponse::OK);
             res.setContentType("application/json");
@@ -276,6 +302,7 @@ int main() {
         std::cout << "  GET  /api/info" << std::endl;
         std::cout << "  GET  /api/dataset" << std::endl;
         std::cout << "  GET  /api/queries" << std::endl;
+        std::cout << "  GET  /api/context" << std::endl;
         std::cout << "  POST /api/compare" << std::endl;
         std::cout << "  GET  /api/result?job_id=<job_id>" << std::endl;
         std::cout << "  DELETE /api/cache" << std::endl;

@@ -37,6 +37,9 @@ public:
     // Initialize the service with SIFT data
     bool initialize(const std::string& sift_file_path);
     
+    // Initialize with separate query vectors
+    bool initializeWithQueries(const std::string& sift_base_path, const std::string& sift_query_path);
+    
     // Start a new comparison job
     std::string startComparisonJob(int query_index, int k);
     
@@ -49,6 +52,16 @@ public:
     // Get dataset info
     std::string getDatasetInfo();
     
+    // Get query context information
+    struct QueryContext {
+        int max_dataset_index;
+        int num_query_vectors;
+        int dataset_size;
+        std::string dataset_info;
+        std::string query_info;
+    };
+    QueryContext getQueryContext();
+    
     // Serialization support for persistent storage
     bool saveAlgorithmsToFile(const std::string& cache_dir = "algorithm_cache");
     bool loadAlgorithmsFromFile(const std::string& cache_dir = "algorithm_cache");
@@ -57,6 +70,7 @@ public:
 private:
     // Data
     std::vector<SIFTVector> sift_vectors_;
+    std::vector<SIFTVector> query_vectors_;  // Separate query vectors
     std::unique_ptr<SannsDB<SIFTVector>> sanns_db_;
     std::unique_ptr<SSPTree<SIFTVector>> ssp_tree_;
     bool algorithms_built_ = false;

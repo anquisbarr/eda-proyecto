@@ -300,7 +300,31 @@ public:
         std::cout << "Iniciando construccion de SannsDB con " << dataset.size() << " puntos...\n";
         
 #ifdef _OPENMP
-        std::cout << "Using OpenMP with " << omp_get_max_threads() << " threads for SANNS construction\n";
+        // Explicitly enforce thermal management thread limits in SANNS
+        // Check if a thermal limit has been set via environment variable
+        const char* thermal_limit_env = std::getenv("EDA_MAX_THREADS");
+        int thermal_limit = 8; // Balanced default: 8 threads for performance vs thermal balance
+        
+        if (thermal_limit_env) {
+            try {
+                thermal_limit = std::stoi(thermal_limit_env);
+                thermal_limit = std::max(1, std::min(thermal_limit, omp_get_max_threads()));
+            } catch (...) {
+                thermal_limit = 4; // Fallback to conservative default
+            }
+        }
+        
+        // Enforce the thermal limit for SANNS operations
+        omp_set_num_threads(thermal_limit);
+        
+        int actual_threads = omp_get_max_threads();
+        int system_max = omp_get_num_procs();
+        
+        std::cout << "SANNS thermal management: Using " << thermal_limit << " threads (system max: " << system_max << ")\n";
+        
+        if (thermal_limit < system_max) {
+            std::cout << "  -> Conservative thermal limit active to prevent overheating\n";
+        }
 #endif
         
         m_groups.clear();

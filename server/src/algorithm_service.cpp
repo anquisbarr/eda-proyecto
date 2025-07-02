@@ -18,6 +18,7 @@
 #include <future>
 #include <mutex>
 #include <atomic>
+#include <cstdlib>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -42,7 +43,7 @@ bool AlgorithmService::initialize(const std::string& sift_file_path) {
         
         // Use only a portion of the dataset for faster processing and reduced memory usage
         size_t original_size = sift_vectors_.size();
-        size_t reduced_size = original_size / 32;  // Use 1/8 of dataset for testing OpenMP performance
+        size_t reduced_size = original_size / 128;  // Use 1/32 of dataset for testing OpenMP performance
         sift_vectors_.resize(reduced_size);
         std::cout << "Using reduced dataset: " << reduced_size << " vectors (reduced from " << original_size << ") for testing" << std::endl;
         
@@ -111,18 +112,35 @@ bool AlgorithmService::initialize(const std::string& sift_file_path) {
         std::cout << "  APPROX_BINS_L_CLUSTERING: " << APPROX_BINS_L_CLUSTERING << std::endl;
         std::cout << "  Expected result: Multiple groups with smaller clusters for better precision" << std::endl;
         
-        // Hardware information
-        unsigned int num_threads = std::thread::hardware_concurrency();
-        if (num_threads == 0) num_threads = 4; // fallback
+        // Hardware information with balanced thermal management
+        unsigned int max_threads = std::thread::hardware_concurrency();
+        if (max_threads == 0) max_threads = 4; // fallback
         
-        // Limit threads to 12 to prevent overheating
-        num_threads = std::min(num_threads, 12u);
+        // Balanced thread limits to prevent overheating while maintaining performance
+        // Allow override via environment variable for testing
+        const char* thread_limit_env = std::getenv("EDA_MAX_THREADS");
+        unsigned int thread_limit = 8;  // Balanced default: use 8 threads (50% of 16-core system)
+        
+        if (thread_limit_env) {
+            try {
+                thread_limit = std::stoi(thread_limit_env);
+                thread_limit = std::max(1u, std::min(thread_limit, max_threads));
+                std::cout << "Using custom thread limit from EDA_MAX_THREADS: " << thread_limit << std::endl;
+            } catch (...) {
+                std::cout << "Invalid EDA_MAX_THREADS value, using default: " << thread_limit << std::endl;
+            }
+        }
+        
+        unsigned int num_threads = std::min(max_threads, thread_limit);
+        
+        std::cout << "Thermal management: Using " << num_threads << " threads (available: " 
+                  << max_threads << ", limit: " << thread_limit << ")" << std::endl;
         
 #ifdef _OPENMP
         omp_set_num_threads(num_threads);
-        std::cout << "OpenMP available with " << num_threads << " threads (limited to 12 for thermal management)" << std::endl;
+        std::cout << "OpenMP available with " << num_threads << " threads (balanced thermal limit)" << std::endl;
 #else
-        std::cout << "Using " << num_threads << " threads (std::async, limited to 12 for thermal management)" << std::endl;
+        std::cout << "Using " << num_threads << " threads (std::async, balanced thermal limit)" << std::endl;
 #endif
 
             // Memory usage warning for large datasets
@@ -278,6 +296,331 @@ bool AlgorithmService::initialize(const std::string& sift_file_path) {
     }
 }
 
+bool AlgorithmService::initializeWithQueries(const std::string& sift_base_path, const std::string& sift_query_path) {
+    try {
+        // Load SIFT base vectors
+        std::cout << "Loading SIFT base dataset..." << std::endl;
+        sift_vectors_ = SIFTReader::readFile(sift_base_path);
+        if (sift_vectors_.empty()) {
+            std::cerr << "Failed to load base vectors from: " << sift_base_path << std::endl;
+            return false;
+        }
+        std::cout << "Loaded " << sift_vectors_.size() << " base vectors" << std::endl;
+        
+        // Load query vectors separately
+        std::cout << "Loading SIFT query vectors..." << std::endl;
+        query_vectors_ = SIFTReader::readFile(sift_query_path);
+        if (query_vectors_.empty()) {
+            std::cerr << "Failed to load query vectors from: " << sift_query_path << std::endl;
+            return false;
+        }
+        std::cout << "Loaded " << query_vectors_.size() << " query vectors" << std::endl;
+        
+        // Use only a portion of the dataset for faster processing and reduced memory usage
+        size_t original_size = sift_vectors_.size();
+        size_t reduced_size = original_size / 32;  // Use 1/16 of dataset as requested
+        sift_vectors_.resize(reduced_size);
+        std::cout << "Using reduced dataset: " << reduced_size << " vectors (reduced from " << original_size << ") - 1/16 of full dataset" << std::endl;
+        
+        // Try to load from cache first
+        std::string cache_dir = "algorithm_cache";
+        std::cout << "Checking algorithm cache..." << std::endl;
+        
+        if (isCacheValid(cache_dir, sift_base_path)) {
+            std::cout << "Valid cache found, attempting to load..." << std::endl;
+            if (loadAlgorithmsFromFile(cache_dir)) {
+                std::cout << "Algorithms loaded from cache successfully!" << std::endl;
+                algorithms_built_ = true;
+                return true;
+            } else {
+                std::cout << "Cache load failed, building from scratch..." << std::endl;
+            }
+        } else {
+            std::cout << "No valid cache found, building from scratch..." << std::endl;
+        }
+        
+        // Build algorithms from scratch
+        std::cout << "Building algorithms (this may take a few minutes)..." << std::endl;
+        
+        // Initialize SANNS DB with dynamic parameters optimized for better precision
+        auto N = sift_vectors_.size();
+        
+        // More aggressive clustering for better precision
+        // Lower threshold means recursion triggers sooner, creating more groups
+        float LARGE_CLUSTER_FRAC_ALPHA;
+        if (N >= 100000) {
+            LARGE_CLUSTER_FRAC_ALPHA = 0.015f; // 1.5% for large datasets
+        } else if (N >= 50000) {
+            LARGE_CLUSTER_FRAC_ALPHA = 0.02f;  // 2% for medium datasets
+        } else {
+            LARGE_CLUSTER_FRAC_ALPHA = 0.03f;  // 3% for smaller datasets
+        }
+
+        // Much smaller clusters to force more subdivision and create multiple groups
+        // Target: roughly 1% of dataset size, but with reasonable bounds
+        size_t MAX_CLUSTER_SIZE_M;
+        if (N >= 100000) {
+            MAX_CLUSTER_SIZE_M = static_cast<size_t>(N * 0.01); // 1% of dataset
+            MAX_CLUSTER_SIZE_M = std::max(static_cast<size_t>(200), MAX_CLUSTER_SIZE_M);
+            MAX_CLUSTER_SIZE_M = std::min(static_cast<size_t>(800), MAX_CLUSTER_SIZE_M);
+        } else {
+            MAX_CLUSTER_SIZE_M = static_cast<size_t>(std::sqrt(N) * 1.5); // Traditional formula for smaller datasets
+            MAX_CLUSTER_SIZE_M = std::max(static_cast<size_t>(50), MAX_CLUSTER_SIZE_M);
+            MAX_CLUSTER_SIZE_M = std::min(static_cast<size_t>(400), MAX_CLUSTER_SIZE_M);
+        }
+
+        // Adjusted for better retrieval with multiple groups
+        const double U_CONSTANT = 2.0; // Increased to retrieve more clusters
+        size_t CLUSTERS_TO_RETRIEVE_U = static_cast<size_t>(U_CONSTANT * std::log2(N));
+        CLUSTERS_TO_RETRIEVE_U = std::max(static_cast<size_t>(5), CLUSTERS_TO_RETRIEVE_U); // Higher minimum
+        CLUSTERS_TO_RETRIEVE_U = std::min(static_cast<size_t>(50), CLUSTERS_TO_RETRIEVE_U); // Lower maximum for efficiency
+
+        // Balanced L factor for approximation quality
+        const double L_FACTOR = 6.0; // Reduced from 8.0 for better balance
+        size_t APPROX_BINS_L_CLUSTERING = static_cast<size_t>(L_FACTOR * CLUSTERS_TO_RETRIEVE_U);
+        
+        // Print optimized parameters for precision-focused clustering
+        std::cout << "SANNS Parameters (precision-optimized) for " << N << " points:" << std::endl;
+        std::cout << "  MAX_CLUSTER_SIZE_M: " << MAX_CLUSTER_SIZE_M << " (target: ~" << std::fixed << std::setprecision(1) << (100.0 * MAX_CLUSTER_SIZE_M / N) << "% of dataset)" << std::endl;
+        std::cout << "  LARGE_CLUSTER_FRAC_ALPHA: " << LARGE_CLUSTER_FRAC_ALPHA << " (trigger recursion when large clusters > " << std::fixed << std::setprecision(1) << (LARGE_CLUSTER_FRAC_ALPHA * 100) << "% of points)" << std::endl;
+        std::cout << "  CLUSTERS_TO_RETRIEVE_U: " << CLUSTERS_TO_RETRIEVE_U << std::endl;
+        std::cout << "  APPROX_BINS_L_CLUSTERING: " << APPROX_BINS_L_CLUSTERING << std::endl;
+        std::cout << "  Expected result: Multiple groups with smaller clusters for better precision" << std::endl;
+        
+        // Hardware information with conservative thermal management
+        unsigned int max_threads = std::thread::hardware_concurrency();
+        if (max_threads == 0) max_threads = 4; // fallback
+        
+        // Very conservative thread limits to prevent overheating
+        // Allow override via environment variable for testing
+        const char* thread_limit_env = std::getenv("EDA_MAX_THREADS");
+        unsigned int thread_limit = 4;  // Conservative default: use only 4 threads
+        
+        if (thread_limit_env) {
+            try {
+                thread_limit = std::stoi(thread_limit_env);
+                thread_limit = std::max(1u, std::min(thread_limit, max_threads));
+                std::cout << "Using custom thread limit from EDA_MAX_THREADS: " << thread_limit << std::endl;
+            } catch (...) {
+                std::cout << "Invalid EDA_MAX_THREADS value, using default: " << thread_limit << std::endl;
+            }
+        }
+        
+        unsigned int num_threads = std::min(max_threads, thread_limit);
+        
+        std::cout << "Thermal management: Using " << num_threads << " threads (available: " 
+                  << max_threads << ", limit: " << thread_limit << ")" << std::endl;
+        
+#ifdef _OPENMP
+        omp_set_num_threads(num_threads);
+        std::cout << "OpenMP available with " << num_threads << " threads (balanced thermal limit)" << std::endl;
+#else
+        std::cout << "Using " << num_threads << " threads (std::async, balanced thermal limit)" << std::endl;
+#endif
+
+        // Memory usage warning for large datasets
+        if (N > 500000) {
+            double estimated_memory_gb = (N * 128 * sizeof(float)) / (1024.0 * 1024.0 * 1024.0);
+            std::cout << "WARNING: Large dataset detected (" << N << " points)" << std::endl;
+            std::cout << "  Estimated memory usage: ~" << std::fixed << std::setprecision(1) 
+                      << estimated_memory_gb << "GB for SIFT vectors alone" << std::endl;
+            std::cout << "  Building algorithms in parallel may take several minutes..." << std::endl;
+            std::cout << "  Precision calculation will be disabled for performance" << std::endl;
+        }
+
+        // Initialize SSP-Tree parameters early for parallel construction
+        size_t MAX_ENTRIES = 32;
+        if (N > 500000) {
+            MAX_ENTRIES = std::min(static_cast<size_t>(128), static_cast<size_t>(32 + N/50000));
+            std::cout << "Increased SSP-Tree MAX_ENTRIES to " << MAX_ENTRIES << " for large dataset" << std::endl;
+        }
+        
+        std::cout << "Building algorithms in parallel..." << std::endl;
+        auto total_start = std::chrono::high_resolution_clock::now();
+        
+        // Build SANNS and SSP-Tree in parallel using std::async
+        auto sanns_future = std::async(std::launch::async, [&]() {
+            std::cout << "[SANNS] Starting SANNS DB construction..." << std::endl;
+            auto sanns_start = std::chrono::high_resolution_clock::now();
+            
+            // Add progress monitoring thread for SANNS
+            std::atomic<bool> sanns_complete(false);
+            std::thread progress_thread([&sanns_complete, sanns_start]() {
+                int elapsed_seconds = 0;
+                while (!sanns_complete.load()) {
+                    std::this_thread::sleep_for(std::chrono::seconds(15));
+                    elapsed_seconds += 15;
+                    if (!sanns_complete.load()) {
+                        std::cout << "[SANNS] Construction in progress... " << elapsed_seconds << "s elapsed" << std::endl;
+                        
+                        // Timeout protection - kill if taking too long
+                        if (elapsed_seconds > 600) { // 10 minutes timeout
+                            std::cout << "[SANNS] ERROR: Construction timed out after 10 minutes!" << std::endl;
+                            std::cout << "[SANNS] This may indicate an infinite loop or deadlock in SANNS" << std::endl;
+                            throw std::runtime_error("SANNS construction timeout");
+                        }
+                    }
+                }
+            });
+            
+            try {
+                auto sanns_temp = std::make_unique<SannsDB<SIFTVector>>(
+                    MAX_CLUSTER_SIZE_M, LARGE_CLUSTER_FRAC_ALPHA, 
+                    CLUSTERS_TO_RETRIEVE_U, APPROX_BINS_L_CLUSTERING
+                );
+                
+                std::cout << "[SANNS] Calling build() method..." << std::endl;
+                sanns_temp->build(sift_vectors_);
+                std::cout << "[SANNS] Build() method completed successfully" << std::endl;
+                
+                sanns_complete.store(true);
+                progress_thread.join();
+                
+                auto sanns_end = std::chrono::high_resolution_clock::now();
+                auto sanns_time = std::chrono::duration<double>(sanns_end - sanns_start).count();
+                std::cout << "[SANNS] SANNS DB built in " << std::fixed << std::setprecision(2) << sanns_time << " seconds" << std::endl;
+                
+                return sanns_temp;
+            } catch (...) {
+                sanns_complete.store(true);
+                progress_thread.join();
+                throw;
+            }
+        });
+        
+        auto ssp_future = std::async(std::launch::async, [&, MAX_ENTRIES]() {
+            std::cout << "[SSP-Tree] Starting SSP-Tree construction..." << std::endl;
+            auto ssp_start = std::chrono::high_resolution_clock::now();
+            
+            auto ssp_temp = std::make_unique<SSPTree<SIFTVector>>(MAX_ENTRIES);
+            
+            // Add progress monitoring for SSP-Tree (less intensive than SANNS)
+            std::mutex insert_mutex;
+            std::atomic<size_t> inserted_count(0);
+            
+            // Use OpenMP for parallel insertion if available
+#ifdef _OPENMP
+            std::cout << "[SSP-Tree] Using OpenMP parallel insertion with " << num_threads << " threads" << std::endl;
+            #pragma omp parallel for schedule(dynamic, 100)
+            for (size_t i = 0; i < sift_vectors_.size(); ++i) {
+                {
+                    std::lock_guard<std::mutex> lock(insert_mutex);
+                    ssp_temp->insert(sift_vectors_[i]);
+                }
+                
+                size_t current_count = inserted_count.fetch_add(1) + 1;
+                if (current_count % 5000 == 0) {
+                    std::cout << "[SSP-Tree] Inserted " << current_count << "/" << sift_vectors_.size() << " vectors" << std::endl;
+                }
+            }
+#else
+            // Fallback: parallel insertion using std::async
+            std::cout << "[SSP-Tree] Using std::async parallel insertion with " << num_threads << " threads" << std::endl;
+            const size_t chunk_size = sift_vectors_.size() / num_threads;
+            std::vector<std::future<void>> futures;
+            
+            for (unsigned int t = 0; t < num_threads; ++t) {
+                size_t start_idx = t * chunk_size;
+                size_t end_idx = (t == num_threads - 1) ? sift_vectors_.size() : (t + 1) * chunk_size;
+                
+                futures.push_back(std::async(std::launch::async, [&, start_idx, end_idx]() {
+                    for (size_t i = start_idx; i < end_idx; ++i) {
+                        {
+                            std::lock_guard<std::mutex> lock(insert_mutex);
+                            ssp_temp->insert(sift_vectors_[i]);
+                        }
+                        
+                        size_t current_count = inserted_count.fetch_add(1) + 1;
+                        if (current_count % 5000 == 0) {
+                            std::cout << "[SSP-Tree] Inserted " << current_count << "/" << sift_vectors_.size() << " vectors" << std::endl;
+                        }
+                    }
+                }));
+            }
+            
+            // Wait for all threads to complete
+            for (auto& future : futures) {
+                future.wait();
+            }
+#endif
+            
+            auto ssp_end = std::chrono::high_resolution_clock::now();
+            auto ssp_time = std::chrono::duration<double>(ssp_end - ssp_start).count();
+            std::cout << "[SSP-Tree] SSP-Tree built in " << std::fixed << std::setprecision(2) << ssp_time << " seconds" << std::endl;
+            
+            return ssp_temp;
+        });
+        
+        // Wait for both algorithms to complete
+        try {
+            sanns_db_ = sanns_future.get();
+            ssp_tree_ = ssp_future.get();
+            
+            auto total_end = std::chrono::high_resolution_clock::now();
+            auto total_time = std::chrono::duration<double>(total_end - total_start).count();
+            
+            std::cout << "All algorithms built successfully in " << std::fixed << std::setprecision(2) << total_time << " seconds" << std::endl;
+            algorithms_built_ = true;
+            
+            // Save to cache for future use
+            std::cout << "Saving algorithms to cache..." << std::endl;
+            if (saveAlgorithmsToFile(cache_dir)) {
+                std::cout << "Algorithms saved to cache successfully" << std::endl;
+            } else {
+                std::cout << "Warning: Failed to save algorithms to cache" << std::endl;
+            }
+            
+        } catch (const std::exception& e) {
+            std::cerr << "Error during algorithm construction: " << e.what() << std::endl;
+            return false;
+        }
+        
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error during initialization: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+AlgorithmService::QueryContext AlgorithmService::getQueryContext() {
+    QueryContext context;
+    
+    context.dataset_size = static_cast<int>(sift_vectors_.size());
+    context.max_dataset_index = std::max(0, context.dataset_size - 1);
+    context.num_query_vectors = static_cast<int>(query_vectors_.size());
+    
+    // Build dataset info
+    std::ostringstream dataset_oss;
+    if (sift_vectors_.empty()) {
+        dataset_oss << "Dataset not loaded";
+    } else {
+        auto N = sift_vectors_.size();
+        dataset_oss << "Dataset: " << N << " SIFT vectors, ";
+        dataset_oss << "Dimension: " << sift_vectors_[0].getDimension();
+        
+        // Add optimization status information
+        if (N > 500000) {
+            dataset_oss << " (Large dataset mode: precision calculation disabled for performance)";
+        } else if (N > 100000) {
+            dataset_oss << " (Medium dataset: optimized parameters enabled)";
+        }
+    }
+    context.dataset_info = dataset_oss.str();
+    
+    // Build query info
+    std::ostringstream query_oss;
+    if (query_vectors_.empty()) {
+        query_oss << "Query vectors not loaded - using dataset indices as queries";
+    } else {
+        query_oss << "Query vectors: " << query_vectors_.size() << " SIFT vectors, ";
+        query_oss << "Dimension: " << query_vectors_[0].getDimension();
+    }
+    context.query_info = query_oss.str();
+    
+    return context;
+}
+
 std::string AlgorithmService::startComparisonJob(int query_index, int k) {
     if (query_index < 0 || query_index >= static_cast<int>(sift_vectors_.size())) {
         return "";
@@ -333,7 +676,16 @@ ComparisonResult AlgorithmService::getJobResult(const std::string& job_id) {
 
 std::vector<int> AlgorithmService::getAvailableQueries(int max_count) {
     std::vector<int> indices;
-    int count = std::min(max_count, static_cast<int>(sift_vectors_.size()));
+    
+    // Use query vectors if available, otherwise use dataset indices
+    int available_count;
+    if (!query_vectors_.empty()) {
+        available_count = static_cast<int>(query_vectors_.size());
+    } else {
+        available_count = static_cast<int>(sift_vectors_.size());
+    }
+    
+    int count = std::min(max_count, available_count);
     for (int i = 0; i < count; ++i) {
         indices.push_back(i);
     }
@@ -389,17 +741,33 @@ ComparisonResult AlgorithmService::runComparison(int query_index, int k) {
             throw std::runtime_error("Failed to build algorithms");
         }
         
-        const SIFTVector& query = sift_vectors_[query_index];
+        // Use query vectors if available, otherwise use dataset indices
+        const SIFTVector* query = nullptr;
+        if (!query_vectors_.empty()) {
+            if (query_index < 0 || query_index >= static_cast<int>(query_vectors_.size())) {
+                throw std::runtime_error("Query index out of range for query vectors");
+            }
+            query = &query_vectors_[query_index];
+        } else {
+            if (query_index < 0 || query_index >= static_cast<int>(sift_vectors_.size())) {
+                throw std::runtime_error("Query index out of range for dataset vectors");
+            }
+            query = &sift_vectors_[query_index];
+        }
         
         // Format query info
         std::ostringstream query_info;
-        query_info << "Query index: " << query_index << ", ID: " << query.id;
+        if (!query_vectors_.empty()) {
+            query_info << "Query vector index: " << query_index << " (from separate query set), ID: " << query->id;
+        } else {
+            query_info << "Query index: " << query_index << " (from dataset), ID: " << query->id;
+        }
         result.query_info = query_info.str();
         
         // Run all three algorithms
-        result.results.push_back(runSannsClusteringTest(query, k));
-        result.results.push_back(runSannsLinearScanTest(query, k));
-        result.results.push_back(runSspTreeTest(query, k));
+        result.results.push_back(runSannsClusteringTest(*query, k));
+        result.results.push_back(runSannsLinearScanTest(*query, k));
+        result.results.push_back(runSspTreeTest(*query, k));
         
         auto end_time = std::chrono::high_resolution_clock::now();
         result.total_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
