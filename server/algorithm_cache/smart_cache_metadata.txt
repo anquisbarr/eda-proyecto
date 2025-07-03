@@ -1,0 +1,11 @@
+cache_timestamp=1751579940
+sift_vector_count=31494
+sift_dimension=128
+reduction_factor=128
+thread_limit=8
+max_cluster_size=266
+large_cluster_frac=0.030000
+clusters_to_retrieve=29
+approx_bins=174
+max_entries=32
+sift_file_path=../sift_base.fvecs

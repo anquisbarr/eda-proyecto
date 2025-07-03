@@ -8,6 +8,8 @@
 #include <sstream>
 #include <iomanip>
 #include <fstream>
+#include <cstring>
+#include <cstdlib>
 
 using json = nlohmann::json;
 
@@ -20,6 +22,13 @@ void signalHandler(int) {
         server->stop();
     }
     exit(0);
+}
+
+void printUsage(const char* program_name) {
+    std::cout << "Usage: " << program_name << " [fraction]\n";
+    std::cout << "  fraction: Optional fraction of dataset to use (0.0 to 1.0, default: 1.0)\n";
+    std::cout << "  Example: " << program_name << " 0.1  # Use 10% of the dataset\n";
+    std::cout << "  Example: " << program_name << "      # Use full dataset\n";
 }
 
 std::string algorithmResultToJson(const AlgorithmResult& result) {
@@ -61,19 +70,44 @@ std::string comparisonResultToJson(const ComparisonResult& result) {
     return json.str();
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     // Set up signal handling for graceful shutdown
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
+
+    // Parse command-line arguments
+    double dataset_fraction = 1.0;  // Default to full dataset
+    
+    if (argc > 1) {
+        if (argc == 2) {
+            char* endptr;
+            dataset_fraction = std::strtod(argv[1], &endptr);
+            
+            if (*endptr != '\0' || dataset_fraction <= 0.0 || dataset_fraction > 1.0) {
+                std::cerr << "Error: Invalid fraction value. Must be between 0.0 and 1.0\n";
+                printUsage(argv[0]);
+                return 1;
+            }
+        } else {
+            std::cerr << "Error: Too many arguments\n";
+            printUsage(argv[0]);
+            return 1;
+        }
+    }
 
     try {
         // Initialize algorithm service
         AlgorithmService algoService;
         algorithmService = &algoService;
 
-        std::cout << "Loading SIFT dataset..." << std::endl;
-        // if (!algoService.initialize("../siftsmall_query.fvecs")) {
-        if (!algoService.initializeWithQueries("../sift_base.fvecs", "../sift_query.fvecs")) {
+        std::cout << "Loading SIFT dataset";
+        if (dataset_fraction < 1.0) {
+            std::cout << " (using " << (dataset_fraction * 100) << "% of dataset)";
+        }
+        std::cout << "..." << std::endl;
+
+        // Initialize with the specified fraction
+        if (!algoService.initializeWithQueries("../sift_base.fvecs", "../sift_query.fvecs", dataset_fraction)) {
             std::cerr << "Failed to load SIFT dataset. Check if sift_base.fvecs and sift_query.fvecs exist in parent directory." << std::endl;
             return 1;
         }
@@ -296,6 +330,9 @@ int main() {
 
         // Start server
         std::cout << "\nStarting HTTP server on port 8080..." << std::endl;
+        if (dataset_fraction < 1.0) {
+            std::cout << "Using " << (dataset_fraction * 100) << "% of the dataset" << std::endl;
+        }
         std::cout << "Visit http://localhost:8080 to view the web server" << std::endl;
         std::cout << "API endpoints:" << std::endl;
         std::cout << "  GET  /api/hello" << std::endl;
@@ -308,6 +345,7 @@ int main() {
         std::cout << "  DELETE /api/cache" << std::endl;
         std::cout << "  GET  /api/cache" << std::endl;
         std::cout << "Press Ctrl+C to stop the server" << std::endl;
+        std::cout << "\nTo use a fraction of the dataset, restart with: " << argv[0] << " <fraction>" << std::endl;
 
         // Start the server (this will block)
         httpServer.start();

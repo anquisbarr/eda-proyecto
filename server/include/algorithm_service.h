@@ -38,7 +38,7 @@ public:
     bool initialize(const std::string& sift_file_path);
     
     // Initialize with separate query vectors
-    bool initializeWithQueries(const std::string& sift_base_path, const std::string& sift_query_path);
+    bool initializeWithQueries(const std::string& sift_base_path, const std::string& sift_query_path, double dataset_fraction = 1.0);
     
     // Start a new comparison job
     std::string startComparisonJob(int query_index, int k);
@@ -62,10 +62,13 @@ public:
     };
     QueryContext getQueryContext();
     
-    // Serialization support for persistent storage
-    bool saveAlgorithmsToFile(const std::string& cache_dir = "algorithm_cache");
-    bool loadAlgorithmsFromFile(const std::string& cache_dir = "algorithm_cache");
-    bool isCacheValid(const std::string& cache_dir, const std::string& sift_file_path);
+    // Smart cache system for parameter tracking
+    bool saveSmartCacheMetadata(const std::string& cache_dir, const std::string& sift_file_path);
+    bool isSmartCacheValid(const std::string& cache_dir, const std::string& sift_file_path);
+    
+    // Full serialization system for algorithm data structures
+    bool saveAlgorithmsToFile(const std::string& cache_dir);
+    bool loadAlgorithmsFromFile(const std::string& cache_dir);
 
 private:
     // Data
@@ -74,6 +77,7 @@ private:
     std::unique_ptr<SannsDB<SIFTVector>> sanns_db_;
     std::unique_ptr<SSPTree<SIFTVector>> ssp_tree_;
     bool algorithms_built_ = false;
+    double dataset_fraction_ = 1.0;  // Store the dataset fraction for cache validation
     
     // Job management
     std::unordered_map<std::string, std::future<ComparisonResult>> running_jobs_;
